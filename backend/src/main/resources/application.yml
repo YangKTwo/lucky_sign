@@ -1,0 +1,55 @@
+server:
+  port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: lucky-sign
+  datasource:
+    url: jdbc:mysql://localhost:3306/lucky_sign?useUnicode=true&characterEncoding=utf8&connectionCollation=utf8mb4_unicode_ci&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:1234}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: Asia/Shanghai
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+  mail:
+    host: ${MAIL_HOST:smtp.example.com}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: false
+          ssl:
+            enable: false
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:lucky-sign-dev-secret-change-me-please-32bytes-min}
+    expire-days: 7
+  upload:
+    dir: ./uploads
+  mail:
+    enabled: false
+    from: lucky-sign@example.com
+  timezone: Asia/Shanghai
+
+logging:
+  level:
+    com.luckysign: INFO

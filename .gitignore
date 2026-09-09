@@ -1,0 +1,52 @@
+# Root
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# Backend
+backend/target/
+backend/uploads/
+backend/.mvn/wrapper/maven-wrapper.jar
+backend/src/main/resources/application-local.yml
+
+# Flutter / mobile
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/.pub-cache/
+mobile/.pub/
+mobile/build/
+mobile/**/GeneratedPluginRegistrant.*
+!mobile/**/GeneratedPluginRegistrant.java
+!mobile/**/GeneratedPluginRegistrant.swift
+!mobile/**/GeneratedPluginRegistrant.m
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/**/captures/
+mobile/android/**/key.properties
+mobile/android/**/*.jks
+mobile/android/**/*.keystore
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/Flutter.framework
+mobile/ios/Flutter/Flutter.podspec
+mobile/ios/Flutter/Generated.xcconfig
+mobile/ios/Flutter/ephemeral/
+mobile/ios/ServiceDefinitions.json
+mobile/ios/Runner/GeneratedPluginRegistrant.*
+
+# Misc
+**/node_modules/
+**/dist/
+**/.gradle/
+**/captures/
