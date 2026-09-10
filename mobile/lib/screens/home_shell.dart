@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../services/mention_bus.dart';
+import '../services/chat_inbox.dart';
 import '../theme.dart';
 import 'chat_screen.dart';
 import 'profile_screen.dart';
@@ -16,6 +16,25 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+
+  Widget _communityIcon({required bool selected}) {
+    return ValueListenableBuilder<List<int>>(
+      valueListenable: ChatInbox.instance.unreadIds,
+      builder: (_, ids, __) {
+        final count = ids.length;
+        final icon = Icon(
+          selected ? Icons.forum : Icons.forum_outlined,
+          color: selected ? AppColors.accent : null,
+        );
+        if (count <= 0) return icon;
+        final label = count > 99 ? '99+' : '$count';
+        return Badge(
+          label: Text(label),
+          child: icon,
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,22 +58,8 @@ class _HomeShellState extends State<HomeShell> {
             label: '今日',
           ),
           NavigationDestination(
-            icon: ValueListenableBuilder<List<int>>(
-              valueListenable: MentionBus.instance.unreadIds,
-              builder: (_, ids, __) => Badge(
-                isLabelVisible: ids.isNotEmpty,
-                label: Text('${ids.length}'),
-                child: const Icon(Icons.forum_outlined),
-              ),
-            ),
-            selectedIcon: ValueListenableBuilder<List<int>>(
-              valueListenable: MentionBus.instance.unreadIds,
-              builder: (_, ids, __) => Badge(
-                isLabelVisible: ids.isNotEmpty,
-                label: Text('${ids.length}'),
-                child: const Icon(Icons.forum, color: AppColors.accent),
-              ),
-            ),
+            icon: _communityIcon(selected: false),
+            selectedIcon: _communityIcon(selected: true),
             label: '社区',
           ),
           const NavigationDestination(

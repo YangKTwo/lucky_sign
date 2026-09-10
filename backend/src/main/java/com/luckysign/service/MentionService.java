@@ -102,7 +102,7 @@ public class MentionService {
                     break;
                 }
                 int end = idx + token.length();
-                if (!rangeUsed(used, idx, end)) {
+                if (!rangeUsed(used, idx, end) && isMentionBoundary(content, end)) {
                     Long uid = nickMap.get(name);
                     if (uid != null && (excludeUserId == null || !uid.equals(excludeUserId))) {
                         hit.add(uid);
@@ -113,6 +113,24 @@ public class MentionService {
             }
         }
         return List.copyOf(hit);
+    }
+
+    /** @昵称 后应为结尾或空白/标点，避免短昵称误伤。 */
+    private static boolean isMentionBoundary(String content, int end) {
+        if (end >= content.length()) {
+            return true;
+        }
+        char c = content.charAt(end);
+        if (Character.isWhitespace(c)) {
+            return true;
+        }
+        return switch (c) {
+            case ',', '.', '!', '?', ';', ':',
+                    '，', '。', '！', '？', '；', '：',
+                    '、', ')', '）', ']', '】', '}', '"', '\'',
+                    '\n', '\r', '\t' -> true;
+            default -> false;
+        };
     }
 
     public String serializeMentionIds(List<Long> ids) {

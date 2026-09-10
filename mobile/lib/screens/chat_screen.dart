@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../main.dart';
 import '../services/api_client.dart';
+import '../services/chat_inbox.dart';
 import '../services/chat_socket.dart';
-import '../services/mention_bus.dart';
 import '../theme.dart';
 import '../widgets/ui_bits.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, this.isActive = true});
 
-  /// 当前是否在底部「社区」Tab（用于决定是否立刻标记已读）。
+  /// 当前是否在底部「社区」Tab。
   final bool isActive;
 
   @override
@@ -26,6 +27,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _members = <Map<String, dynamic>>[];
   bool _loading = true;
   int? _myUserId;
+  String? _myNickname;
   bool _showMentionPicker = false;
   String _mentionQuery = '';
   int _atStart = -1;
@@ -36,6 +38,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _myUserId = ApiClient.instance.userId;
+    _scroll.addListener(_onScroll);
     _ensureMyUserId();
     _loadMembers();
     _loadHistory();
@@ -46,8 +49,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final isNew = _items.every((e) => e['id'] != msg['id']);
       setState(() => _upsertMessage(msg));
       if (isNew) {
-        _maybeTrackMention(msg);
-        _jumpBottom();
+        _onNewMessage(msg);
       }
     });
   }
@@ -55,22 +57,24 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void didUpdateWidget(covariant ChatScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!oldWidget.isActive && widget.isActive) {
-      // 切回社区时不自动清未读，保留「有人@我」跳转。
-    }
+    // 切回社区时保留未读/@，由右上角按钮跳到最初一条；滑到底部才标记已读。
   }
 
   Future<void> _ensureMyUserId() async {
-    if (_myUserId != null) return;
     try {
       final res = await ApiClient.instance.getJson('/api/user/profile');
       if (!mounted) return;
-      final id = res['data']?['id'];
+      final data = res['data'];
+      final id = data?['id'];
       final parsed = id is int ? id : (id is num ? id.toInt() : null);
+      final nick = data?['nickname']?.toString();
       if (parsed != null) {
         await ApiClient.instance.saveUserId(parsed);
-        setState(() => _myUserId = parsed);
       }
+      setState(() {
+        if (parsed != null) _myUserId = parsed;
+        if (nick != null && nick.isNotEmpty) _myNickname = nick;
+      });
     } catch (_) {}
   }
 
@@ -102,22 +106,86 @@ class _ChatScreenState extends State<ChatScreen> {
     return int.tryParse(v?.toString() ?? '');
   }
 
+  bool _isNearBottom() {
+    if (!_scroll.hasClients) return true;
+    final pos = _scroll.position;
+    return pos.maxScrollExtent - pos.pixels <= 120;
+  }
+
+  void _onScroll() {
+    if (!widget.isActive) return;
+    if (_isNearBottom()) {
+      _markVisibleAsRead();
+    }
+  }
+
+  Future<void> _markVisibleAsRead() async {
+    if (_items.isEmpty) return;
+    final latest = _asInt(_items.last['id']);
+    if (latest == null) return;
+    await ChatInbox.instance.markReadThrough(latest);
+    if (mounted) setState(() {});
+  }
+
   bool _mentionsMe(Map<String, dynamic> m) {
-    if (_myUserId == null || _isMine(m)) return false;
+    if (_isMine(m)) return false;
     final raw = m['mentionedUserIds'];
-    if (raw is! List) return false;
-    for (final e in raw) {
-      final id = _asInt(e);
-      if (id == _myUserId) return true;
+    if (raw is List && _myUserId != null) {
+      for (final e in raw) {
+        if (_asInt(e) == _myUserId) return true;
+      }
+    }
+    // 客户端兜底：正文含 @我的昵称
+    final nick = _myNickname?.trim();
+    final content = m['content']?.toString() ?? '';
+    if (nick != null && nick.isNotEmpty && content.contains('@$nick')) {
+      final idx = content.indexOf('@$nick');
+      final end = idx + nick.length + 1;
+      if (end >= content.length) return true;
+      final next = content[end];
+      if (RegExp(r'[\s,.!?;:，。！？；：、)\]\}」』]').hasMatch(next)) return true;
     }
     return false;
   }
 
-  void _maybeTrackMention(Map<String, dynamic> msg) {
-    if (!_mentionsMe(msg)) return;
+  void _onNewMessage(Map<String, dynamic> msg) {
     final id = _asInt(msg['id']);
     if (id == null) return;
-    MentionBus.instance.push(id);
+    final mine = _isMine(msg);
+    final mentionsMe = _mentionsMe(msg);
+    final away = !widget.isActive || !_isNearBottom();
+
+    if (!mine && away) {
+      ChatInbox.instance.pushUnread(id);
+    }
+    if (mentionsMe && away) {
+      ChatInbox.instance.pushMention(id);
+      final from = msg['nickname']?.toString() ?? '有人';
+      rootScaffoldMessengerKey.currentState
+        ?..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('$from @了你'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: '查看',
+              onPressed: () {
+                // 用户需自己切到社区；若已在社区则跳转
+                _jumpToMessage(id, markThrough: false);
+              },
+            ),
+          ),
+        );
+    }
+
+    if (widget.isActive && _isNearBottom()) {
+      _jumpBottom();
+      _markVisibleAsRead();
+    } else if (widget.isActive && mine) {
+      _jumpBottom();
+    }
+    if (mounted) setState(() {});
   }
 
   void _jumpBottom() {
@@ -131,15 +199,13 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  Future<void> _jumpToMention() async {
-    final id = MentionBus.instance.oldest;
-    if (id == null) return;
+  Future<void> _jumpToMessage(int id, {required bool markThrough}) async {
     final index = _items.indexWhere((e) => _asInt(e['id']) == id);
     if (index < 0) {
-      MentionBus.instance.remove(id);
+      ChatInbox.instance.remove(id);
+      if (mounted) setState(() {});
       return;
     }
-    MentionBus.instance.remove(id);
     await Future<void>.delayed(const Duration(milliseconds: 16));
     final key = _itemKeys[id];
     final ctx = key?.currentContext;
@@ -148,14 +214,32 @@ class _ChatScreenState extends State<ChatScreen> {
         ctx,
         duration: const Duration(milliseconds: 320),
         curve: Curves.easeOutCubic,
-        alignment: 0.25,
+        alignment: 0.2,
       );
     }
-    setState(() {});
+    if (markThrough) {
+      await ChatInbox.instance.markReadThrough(id);
+    } else {
+      ChatInbox.instance.remove(id);
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _jumpToOldestUnreadOrMention() async {
+    final mentionId = ChatInbox.instance.oldestMention;
+    if (mentionId != null) {
+      await _jumpToMessage(mentionId, markThrough: true);
+      return;
+    }
+    final unreadId = ChatInbox.instance.oldestUnread;
+    if (unreadId != null) {
+      await _jumpToMessage(unreadId, markThrough: true);
+    }
   }
 
   Future<void> _loadHistory() async {
     try {
+      await ChatInbox.instance.load();
       final res = await ApiClient.instance.getJson('/api/chat/messages?size=50');
       if (!mounted) return;
       final list = (res['data']['messages'] as List).cast<Map<String, dynamic>>();
@@ -164,6 +248,25 @@ class _ChatScreenState extends State<ChatScreen> {
           ..clear()
           ..addAll(list);
       });
+
+      // 首次：记下当前最新为已读；否则恢复未读/@
+      final latest = list.isEmpty ? null : _asInt(list.last['id']);
+      if (ChatInbox.instance.lastReadId == null) {
+        if (latest != null) {
+          await ChatInbox.instance.markReadThrough(latest);
+        }
+      } else {
+        final lastRead = ChatInbox.instance.lastReadId!;
+        for (final m in list) {
+          final id = _asInt(m['id']);
+          if (id == null || id <= lastRead || _isMine(m)) continue;
+          ChatInbox.instance.pushUnread(id);
+          if (_mentionsMe(m)) {
+            ChatInbox.instance.pushMention(id);
+          }
+        }
+      }
+
       _jumpBottom();
     } catch (_) {
     } finally {
@@ -355,6 +458,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _scroll.removeListener(_onScroll);
     _input.removeListener(_onInputChanged);
     _socket.dispose();
     _input.dispose();
@@ -390,25 +494,37 @@ class _ChatScreenState extends State<ChatScreen> {
                 Positioned(
                   right: 12,
                   top: 12,
-                  child: ValueListenableBuilder<List<int>>(
-                    valueListenable: MentionBus.instance.unreadIds,
-                    builder: (_, ids, __) {
-                      if (ids.isEmpty) return const SizedBox.shrink();
+                  child: AnimatedBuilder(
+                    animation: Listenable.merge([
+                      ChatInbox.instance.unreadIds,
+                      ChatInbox.instance.mentionIds,
+                    ]),
+                    builder: (_, __) {
+                      final mentions = ChatInbox.instance.mentionIds.value;
+                      final unreads = ChatInbox.instance.unreadIds.value;
+                      if (mentions.isEmpty && unreads.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      final isMention = mentions.isNotEmpty;
+                      final count = isMention ? mentions.length : unreads.length;
+                      final label = isMention
+                          ? (count == 1 ? '有人@我' : '有人@我 · $count')
+                          : (count > 99 ? '99+ 条未读' : '$count 条未读');
                       return Material(
-                        color: const Color(0xFFFFF3D6),
+                        color: isMention ? const Color(0xFFFFF3D6) : const Color(0xFFE8F2FF),
                         elevation: 2,
                         borderRadius: BorderRadius.circular(20),
                         child: InkWell(
-                          onTap: _jumpToMention,
+                          onTap: _jumpToOldestUnreadOrMention,
                           borderRadius: BorderRadius.circular(20),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             child: Text(
-                              ids.length == 1 ? '有人@我' : '有人@我 · ${ids.length}',
-                              style: const TextStyle(
+                              label,
+                              style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 13,
-                                color: Color(0xFFB86A00),
+                                color: isMention ? const Color(0xFFB86A00) : const Color(0xFF2F6BFF),
                               ),
                             ),
                           ),

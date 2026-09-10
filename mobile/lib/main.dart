@@ -4,11 +4,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/api_client.dart';
+import 'services/chat_inbox.dart';
 import 'theme.dart';
+
+final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ApiClient.instance.loadToken();
+  await ChatInbox.instance.load();
   runApp(const LuckySignApp());
 }
 
@@ -21,6 +25,7 @@ class LuckySignApp extends StatelessWidget {
       title: '今日幸运签',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
+      scaffoldMessengerKey: rootScaffoldMessengerKey,
       home: ApiClient.instance.isLoggedIn ? const HomeShell() : const LoginScreen(),
     );
   }
@@ -28,6 +33,7 @@ class LuckySignApp extends StatelessWidget {
 
 Future<void> logoutAndGoLogin(BuildContext context) async {
   await ApiClient.instance.saveToken(null);
+  await ChatInbox.instance.reset();
   final prefs = await SharedPreferences.getInstance();
   await prefs.clear();
   if (!context.mounted) return;
