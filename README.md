@@ -70,7 +70,7 @@ MYSQL_PASSWORD=123456
 
 # ---- 阿里云 OSS（图片/头像）----
 OSS_ENABLED=true
-OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
+OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com
 OSS_ACCESS_KEY_ID=你的AccessKeyId
 OSS_ACCESS_KEY_SECRET=你的AccessKeySecret
 OSS_BUCKET=你的Bucket名
