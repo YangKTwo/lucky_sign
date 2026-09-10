@@ -45,6 +45,8 @@ app:
     expire-days: 7
   upload:
     dir: ./uploads
+  download:
+    dir: ./downloads
   mail:
     enabled: false
     from: lucky-sign@example.com

@@ -1,0 +1,80 @@
+name: Publish APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/deploy-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build release APK
+        working-directory: mobile
+        run: |
+          flutter pub get
+          flutter build apk --release
+
+      - name: Prepare download files
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p dist/downloads
+          cp mobile/build/app/outputs/flutter-apk/app-release.apk dist/downloads/lucky-sign.apk
+          SIZE=$(stat -c%s dist/downloads/lucky-sign.apk)
+          UPDATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          URL="http://${DEPLOY_HOST}:8080/downloads/lucky-sign.apk"
+          cat > dist/downloads/latest.json <<EOF
+          {"file":"lucky-sign.apk","bytes":${SIZE},"updatedAt":"${UPDATED}","url":"${URL}"}
+          EOF
+          cat > dist/downloads/index.html <<EOF
+          <!DOCTYPE html>
+          <html lang="zh-CN">
+          <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>今日幸运签 下载</title></head>
+          <body style="font-family:sans-serif;max-width:420px;margin:48px auto;padding:0 16px;line-height:1.6">
+            <h1>今日幸运签</h1>
+            <p>安卓安装包（覆盖安装即可）</p>
+            <p><a href="./lucky-sign.apk">下载 APK</a></p>
+            <p style="color:#666;font-size:13px">更新时间（UTC）：${UPDATED}</p>
+          </body>
+          </html>
+          EOF
+
+      - name: Ensure remote directory
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: mkdir -p /www/wwwroot/lucky-api/downloads
+
+      - name: Upload APK
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "dist/downloads/*"
+          target: "/www/wwwroot/lucky-api/downloads/"
+          strip_components: 2
+          overwrite: true

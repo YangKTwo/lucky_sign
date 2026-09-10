@@ -36,6 +36,12 @@ flutter run -d emulator-5554
 
 推送到 `main` 且改动了 `backend/**`（或手动 Run workflow）时，会自动构建 JAR、上传到服务器并重启。
 
+推送到 `main` 且改动了 `mobile/**` 时，会自动打安卓 APK 并放到下载目录。
+
+**安装包地址（覆盖安装）：** http://119.23.45.226:8080/downloads/lucky-sign.apk
+
+页面：http://119.23.45.226:8080/downloads/index.html
+
 ### 1. GitHub Secrets
 
 仓库 → Settings → Secrets and variables → Actions，新增：
@@ -69,9 +75,13 @@ chmod 600 /www/wwwroot/lucky-api/run.env
 
 ### 3. 手动触发
 
-GitHub → Actions → **Deploy backend** → Run workflow。
+GitHub → Actions → **Deploy backend** 或 **Publish APK** → Run workflow。
 
-工作流文件：[`.github/workflows/deploy-backend.yml`](.github/workflows/deploy-backend.yml)；重启脚本：[`deploy/start-backend.sh`](deploy/start-backend.sh)。
+工作流：
+
+- 后端：[`.github/workflows/deploy-backend.yml`](.github/workflows/deploy-backend.yml)
+- APK：[`.github/workflows/deploy-apk.yml`](.github/workflows/deploy-apk.yml)
+- 重启脚本：[`deploy/start-backend.sh`](deploy/start-backend.sh)
 
 ## 说明
 

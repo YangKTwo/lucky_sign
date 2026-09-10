@@ -1,6 +1,5 @@
 package com.luckysign.config;
 
-import com.luckysign.config.AppProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -17,8 +16,14 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        String location = Path.of(appProperties.getUpload().getDir()).toAbsolutePath().toUri().toString();
         registry.addResourceHandler("/uploads/**")
-                .addResourceLocations(location);
+                .addResourceLocations(toDirLocation(appProperties.getUpload().getDir()));
+        registry.addResourceHandler("/downloads/**")
+                .addResourceLocations(toDirLocation(appProperties.getDownload().getDir()));
+    }
+
+    private static String toDirLocation(String dir) {
+        String location = Path.of(dir).toAbsolutePath().normalize().toUri().toString();
+        return location.endsWith("/") ? location : location + "/";
     }
 }
