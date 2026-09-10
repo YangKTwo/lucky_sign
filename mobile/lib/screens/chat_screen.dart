@@ -49,6 +49,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _loadHistory() async {
     try {
       final res = await ApiClient.instance.getJson('/api/chat/messages?size=50');
+      if (!mounted) return;
       final list = (res['data']['messages'] as List).cast<Map<String, dynamic>>();
       setState(() {
         _items
@@ -68,6 +69,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _input.clear();
     try {
       final res = await ApiClient.instance.postJson('/api/chat/messages', {'content': text});
+      if (!mounted) return;
       final msg = res['data'] as Map<String, dynamic>;
       setState(() {
         if (_items.every((e) => e['id'] != msg['id'])) {
@@ -76,11 +78,10 @@ class _ChatScreenState extends State<ChatScreen> {
       });
       _jumpBottom();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
     }
   }
 

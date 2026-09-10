@@ -27,12 +27,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final profile = await ApiClient.instance.getJson('/api/user/profile');
       final history = await ApiClient.instance.getJson('/api/checkin/history');
+      if (!mounted) return;
       setState(() {
         _profile = profile['data'] as Map<String, dynamic>;
         _history = (history['data']['items'] as List).cast<Map<String, dynamic>>();
         _error = null;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
     }
   }
@@ -55,11 +57,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (ok != true || ctrl.text.trim().isEmpty) return;
     try {
       final res = await ApiClient.instance.putJson('/api/user/profile', {'nickname': ctrl.text.trim()});
+      if (!mounted) return;
       setState(() => _profile = res['data'] as Map<String, dynamic>);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
     }
   }
 

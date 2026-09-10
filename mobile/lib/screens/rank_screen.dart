@@ -24,11 +24,13 @@ class _RankScreenState extends State<RankScreen> {
   Future<void> _load() async {
     try {
       final res = await ApiClient.instance.getJson('/api/rank');
+      if (!mounted) return;
       setState(() {
         _data = res['data'] as Map<String, dynamic>;
         _error = null;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
     }
   }

@@ -24,14 +24,17 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final res = await ApiClient.instance.getJson('/api/checkin/today');
+      if (!mounted) return;
       setState(() => _data = res['data'] as Map<String, dynamic>);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -118,16 +121,14 @@ class _TodayScreenState extends State<TodayScreen> {
     if (ok != true) return;
     try {
       final res = await ApiClient.instance.completeCheckin(text: textCtrl.text, image: image);
+      if (!mounted) return;
       setState(() => _data = res['data'] as Map<String, dynamic>);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('打卡成功，已发到社区')));
-      }
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('打卡成功，已发到社区')));
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
     }
   }
 

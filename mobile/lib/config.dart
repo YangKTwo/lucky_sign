@@ -1,20 +1,17 @@
 import 'package:flutter/foundation.dart';
 
+/// 默认连云端；可用 --dart-define=API_BASE=... 覆盖
+const String _defaultApi = 'http://119.23.45.226:8080';
+const String _defaultWs = 'ws://119.23.45.226:8080/ws';
+
 String get apiBaseUrl {
   const fromEnv = String.fromEnvironment('API_BASE');
   if (fromEnv.isNotEmpty) return fromEnv;
-  // Android 模拟器访问本机用 10.0.2.2；Chrome/桌面用 localhost
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return 'http://10.0.2.2:8080';
-  }
-  return 'http://localhost:8080';
+  return _defaultApi;
 }
 
 String get wsBaseUrl {
   const fromEnv = String.fromEnvironment('WS_BASE');
   if (fromEnv.isNotEmpty) return fromEnv;
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return 'ws://10.0.2.2:8080/ws';
-  }
-  return 'ws://localhost:8080/ws';
+  return _defaultWs;
 }
