@@ -18,6 +18,8 @@ public class ChatDtos {
             Instant createdAt,
             Double avgScore,
             Integer ratingCount,
+            Integer expectedRaterCount,
+            boolean ratingComplete,
             Integer myScore
     ) {
     }

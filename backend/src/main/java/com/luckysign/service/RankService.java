@@ -56,7 +56,7 @@ public class RankService {
         Map<Long, DailyDraw> draws = dailyDrawRepository.findByDrawDate(today).stream()
                 .collect(Collectors.toMap(DailyDraw::getUserId, Function.identity(), (a, b) -> a));
         Optional<CircleDailyStar> star = circleDailyStarRepository.findByCircleIdAndStarDate(circle.getId(), today);
-        Map<Long, Double> peerAvg = ratingService.avgScoreByUser();
+        Map<Long, Double> peerAvg = ratingService.finalizedAvgScoreByUser();
 
         List<RankDtos.MemberStatus> list = members.stream()
                 .map(m -> users.get(m.getUserId()))

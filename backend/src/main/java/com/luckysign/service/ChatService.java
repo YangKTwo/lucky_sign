@@ -147,6 +147,8 @@ public class ChatService {
                 msg.getCreatedAt(),
                 rating == null ? null : rating.avgScore(),
                 rating == null ? 0 : rating.ratingCount(),
+                rating == null ? 0 : rating.expectedRaterCount(),
+                rating != null && rating.ratingComplete(),
                 rating == null ? null : rating.myScore()
         );
     }

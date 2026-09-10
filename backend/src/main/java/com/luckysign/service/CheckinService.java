@@ -143,7 +143,7 @@ public class CheckinService {
                             r.getPointsEarned(),
                             r.getTextContent(),
                             r.getImageUrl(),
-                            s == null ? null : s.avgScore(),
+                            s == null || !s.ratingComplete() ? null : s.avgScore(),
                             s == null ? 0 : s.ratingCount());
                 })
                 .toList();

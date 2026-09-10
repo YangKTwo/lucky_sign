@@ -49,4 +49,9 @@ public class CheckinController {
             @RequestBody RatingDtos.RateRequest request) {
         return ApiResponse.ok(ratingService.rate(AuthSupport.currentUserId(), checkinId, request.score()));
     }
+
+    @GetMapping("/{checkinId}")
+    public ApiResponse<RatingDtos.CheckinDetail> detail(@PathVariable Long checkinId) {
+        return ApiResponse.ok(ratingService.detail(checkinId, AuthSupport.currentUserId()));
+    }
 }
