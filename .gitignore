@@ -53,3 +53,7 @@ mobile/ios/Runner/GeneratedPluginRegistrant.*
 **/dist/
 **/.gradle/
 **/captures/
+
+# Local deploy keys (never commit)
+.deploy-keys/
+
