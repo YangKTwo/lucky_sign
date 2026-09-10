@@ -1,0 +1,59 @@
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "deploy/start-backend.sh"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build JAR
+        working-directory: backend
+        run: mvn -B -DskipTests package
+
+      - name: Prepare deploy artifacts
+        run: |
+          mkdir -p dist
+          cp backend/target/lucky-sign-0.0.1-SNAPSHOT.jar dist/
+          cp deploy/start-backend.sh dist/
+          chmod +x dist/start-backend.sh
+
+      - name: Upload to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "dist/*"
+          target: "/www/wwwroot/lucky-api/"
+          strip_components: 1
+          overwrite: true
+
+      - name: Restart backend
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            chmod +x /www/wwwroot/lucky-api/start-backend.sh
+            bash /www/wwwroot/lucky-api/start-backend.sh

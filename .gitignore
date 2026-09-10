@@ -45,6 +45,9 @@ mobile/ios/Flutter/ephemeral/
 mobile/ios/ServiceDefinitions.json
 mobile/ios/Runner/GeneratedPluginRegistrant.*
 
+# Deploy secrets (server-local only)
+**/run.env
+
 # Misc
 **/node_modules/
 **/dist/
