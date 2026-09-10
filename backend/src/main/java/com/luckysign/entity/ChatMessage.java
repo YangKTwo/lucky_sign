@@ -36,6 +36,10 @@ public class ChatMessage {
 
     private Long checkinId;
 
+    /** 被 @ 的用户 id，逗号分隔 */
+    @Column(length = 256)
+    private String mentionedUserIds;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 }

@@ -63,7 +63,7 @@ app:
     model: ${AI_MODEL:qwen-plus}
     base-url: ${AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     mention: ${AI_MENTION:@助手}
-    system-prompt: ${AI_SYSTEM_PROMPT:你是「今日幸运签」小圈子的社区助手，语气轻松友好，回答简洁，用中文。}
+    system-prompt: ${AI_SYSTEM_PROMPT:你是「石桥头第一AI」，「今日幸运签」小圈子的社区助手，语气轻松友好，回答简洁，用中文。}
   mail:
     enabled: false
     from: lucky-sign@example.com

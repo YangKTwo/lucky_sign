@@ -61,7 +61,7 @@ public class AppProperties {
         private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
         /** 触发助手的关键词，默认 @助手 */
         private String mention = "@助手";
-        private String systemPrompt = "你是「今日幸运签」小圈子的社区助手，语气轻松友好，回答简洁，用中文。";
+        private String systemPrompt = "你是「石桥头第一AI」，「今日幸运签」小圈子的社区助手，语气轻松友好，回答简洁，用中文。";
     }
 
     @Getter

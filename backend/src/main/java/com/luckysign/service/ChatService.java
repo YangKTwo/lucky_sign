@@ -30,12 +30,15 @@ import java.util.stream.Collectors;
 
 @Service
 public class ChatService {
+    public static final String ASSISTANT_LOADING = "正在回复…";
+
     private final ChatMessageRepository chatMessageRepository;
     private final CircleRepository circleRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final RatingService ratingService;
     private final AiAssistantService aiAssistantService;
+    private final MentionService mentionService;
     private final ApplicationEventPublisher eventPublisher;
 
     public ChatService(ChatMessageRepository chatMessageRepository,
@@ -44,6 +47,7 @@ public class ChatService {
                        SimpMessagingTemplate messagingTemplate,
                        RatingService ratingService,
                        AiAssistantService aiAssistantService,
+                       MentionService mentionService,
                        ApplicationEventPublisher eventPublisher) {
         this.chatMessageRepository = chatMessageRepository;
         this.circleRepository = circleRepository;
@@ -51,6 +55,7 @@ public class ChatService {
         this.messagingTemplate = messagingTemplate;
         this.ratingService = ratingService;
         this.aiAssistantService = aiAssistantService;
+        this.mentionService = mentionService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -91,19 +96,28 @@ public class ChatService {
             throw new BizException("休眠账号禁言，请联系管理员解锁");
         }
         Circle circle = defaultCircle();
+        String text = content.trim();
+        List<Long> mentioned = mentionService.parseMentionedUserIds(text, circle.getId(), user.getId());
         ChatMessage msg = new ChatMessage();
         msg.setCircleId(circle.getId());
         msg.setUserId(user.getId());
         msg.setNickname(user.getNickname());
         msg.setType(ChatMessageType.TEXT);
-        msg.setContent(content.trim());
+        msg.setContent(text);
+        msg.setMentionedUserIds(mentionService.serializeMentionIds(mentioned));
         msg = chatMessageRepository.save(msg);
         ChatDtos.MessageView view = toView(msg, user, null);
         messagingTemplate.convertAndSend("/topic/chat", view);
-        if (aiAssistantService.isReady() && aiAssistantService.isMentioned(content)) {
+        if (aiAssistantService.isReady() && mentionService.mentionsAssistant(text)) {
+            Long pendingId = postAssistant(ASSISTANT_LOADING);
+            String question = mentionService.stripAssistantMentions(text);
+            if (question.isBlank()) {
+                question = "你好，请简单介绍一下你自己，并说明你可以怎么帮助这个打卡小圈子。";
+            }
             eventPublisher.publishEvent(new AssistantRequestedEvent(
                     user.getNickname(),
-                    aiAssistantService.extractQuestion(content.trim())));
+                    question,
+                    pendingId));
         }
         return view;
     }
@@ -140,14 +154,29 @@ public class ChatService {
     }
 
     @Transactional
-    public void postAssistant(String content) {
+    public Long postAssistant(String content) {
         Circle circle = defaultCircle();
         ChatMessage msg = new ChatMessage();
         msg.setCircleId(circle.getId());
-        msg.setNickname("千问助手");
+        msg.setNickname(MentionService.ASSISTANT_DISPLAY_NAME);
         msg.setType(ChatMessageType.ASSISTANT);
         msg.setContent(content);
         msg = chatMessageRepository.save(msg);
+        messagingTemplate.convertAndSend("/topic/chat", toView(msg, null, null));
+        return msg.getId();
+    }
+
+    @Transactional
+    public void updateAssistant(Long messageId, String content) {
+        if (messageId == null) {
+            return;
+        }
+        ChatMessage msg = chatMessageRepository.findById(messageId).orElse(null);
+        if (msg == null || msg.getType() != ChatMessageType.ASSISTANT) {
+            return;
+        }
+        msg.setContent(content);
+        chatMessageRepository.save(msg);
         messagingTemplate.convertAndSend("/topic/chat", toView(msg, null, null));
     }
 
@@ -174,7 +203,8 @@ public class ChatService {
                 rating == null ? 0 : rating.ratingCount(),
                 rating == null ? 0 : rating.expectedRaterCount(),
                 rating != null && rating.ratingComplete(),
-                rating == null ? null : rating.myScore()
+                rating == null ? null : rating.myScore(),
+                mentionService.deserializeMentionIds(msg.getMentionedUserIds())
         );
     }
 }

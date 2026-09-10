@@ -20,7 +20,8 @@ public class ChatDtos {
             Integer ratingCount,
             Integer expectedRaterCount,
             boolean ratingComplete,
-            Integer myScore
+            Integer myScore,
+            List<Long> mentionedUserIds
     ) {
     }
 
