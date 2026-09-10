@@ -13,6 +13,8 @@ public class AppProperties {
     private Jwt jwt = new Jwt();
     private Upload upload = new Upload();
     private Download download = new Download();
+    private Oss oss = new Oss();
+    private Ai ai = new Ai();
     private Mail mail = new Mail();
     private String timezone = "Asia/Shanghai";
 
@@ -33,6 +35,33 @@ public class AppProperties {
     @Setter
     public static class Download {
         private String dir = "./downloads";
+    }
+
+    @Getter
+    @Setter
+    public static class Oss {
+        /** 为 true 且密钥齐全时走阿里云 OSS，否则本地 uploads */
+        private boolean enabled = false;
+        private String endpoint = "";
+        private String accessKeyId = "";
+        private String accessKeySecret = "";
+        private String bucket = "";
+        /** 对象前缀，如 lucky-sign/ */
+        private String dirPrefix = "lucky-sign/";
+        /** 可选：CDN/自定义域名，不含尾斜杠。为空则用 https://{bucket}.{endpoint}/{key} */
+        private String publicBaseUrl = "";
+    }
+
+    @Getter
+    @Setter
+    public static class Ai {
+        private boolean enabled = false;
+        private String apiKey = "";
+        private String model = "qwen-plus";
+        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+        /** 触发助手的关键词，默认 @助手 */
+        private String mention = "@助手";
+        private String systemPrompt = "你是「今日幸运签」小圈子的社区助手，语气轻松友好，回答简洁，用中文。";
     }
 
     @Getter
