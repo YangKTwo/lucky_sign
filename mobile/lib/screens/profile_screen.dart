@@ -72,6 +72,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _openFeedback() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('意见箱'),
+        content: SizedBox(
+          width: 320,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '想加什么功能、哪里不好用，都可以写在这里。',
+                style: TextStyle(fontSize: 13, color: Color(0xFF8A8078), height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                maxLines: 5,
+                maxLength: 1000,
+                decoration: const InputDecoration(
+                  hintText: '写下你的想法…',
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('提交'),
+          ),
+        ],
+      ),
+    );
+    final text = ctrl.text.trim();
+    ctrl.dispose();
+    if (ok != true) return;
+    if (text.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请填写意见内容')));
+      return;
+    }
+    try {
+      await ApiClient.instance.postJson('/api/feedback', {'content': text});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已收到，感谢反馈')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = _profile;
@@ -134,6 +193,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               else
                 ..._history.take(30).map((h) => _HistoryRow(item: h)),
               const SizedBox(height: 28),
+              _FeedbackEntry(onTap: _openFeedback),
+              const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 height: 48,
@@ -290,6 +351,47 @@ class _HistoryRow extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.accent, fontSize: 15),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FeedbackEntry extends StatelessWidget {
+  const _FeedbackEntry({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE7DDD2)),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.mail_outline, color: AppColors.moss),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('意见箱', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                    SizedBox(height: 2),
+                    Text('提需求、吐槽、许愿都可以', style: TextStyle(fontSize: 12, color: Color(0xFF8A8078))),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Color(0xFFB0A69C)),
+            ],
+          ),
+        ),
       ),
     );
   }
