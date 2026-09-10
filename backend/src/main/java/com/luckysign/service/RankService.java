@@ -29,19 +29,22 @@ public class RankService {
     private final DailyDrawRepository dailyDrawRepository;
     private final CircleDailyStarRepository circleDailyStarRepository;
     private final DrawService drawService;
+    private final RatingService ratingService;
 
     public RankService(CircleRepository circleRepository,
                        CircleMemberRepository circleMemberRepository,
                        UserRepository userRepository,
                        DailyDrawRepository dailyDrawRepository,
                        CircleDailyStarRepository circleDailyStarRepository,
-                       DrawService drawService) {
+                       DrawService drawService,
+                       RatingService ratingService) {
         this.circleRepository = circleRepository;
         this.circleMemberRepository = circleMemberRepository;
         this.userRepository = userRepository;
         this.dailyDrawRepository = dailyDrawRepository;
         this.circleDailyStarRepository = circleDailyStarRepository;
         this.drawService = drawService;
+        this.ratingService = ratingService;
     }
 
     public RankDtos.RankingResponse ranking() {
@@ -53,6 +56,7 @@ public class RankService {
         Map<Long, DailyDraw> draws = dailyDrawRepository.findByDrawDate(today).stream()
                 .collect(Collectors.toMap(DailyDraw::getUserId, Function.identity(), (a, b) -> a));
         Optional<CircleDailyStar> star = circleDailyStarRepository.findByCircleIdAndStarDate(circle.getId(), today);
+        Map<Long, Double> peerAvg = ratingService.avgScoreByUser();
 
         List<RankDtos.MemberStatus> list = members.stream()
                 .map(m -> users.get(m.getUserId()))
@@ -61,11 +65,16 @@ public class RankService {
                     DailyDraw d = draws.get(u.getId());
                     String todayStatus = d == null ? "NONE" : d.getStatus().name();
                     boolean isStar = star.map(s -> s.getUserId().equals(u.getId())).orElse(false);
+                    Double avg = peerAvg.get(u.getId());
+                    int composite = u.getPoints() + (avg == null ? 0 : (int) Math.round(avg * 2));
                     return new RankDtos.MemberStatus(
                             u.getId(),
                             u.getNickname(),
+                            u.getAvatarUrl(),
                             u.getTitle(),
                             u.getPoints(),
+                            avg == null ? null : Math.round(avg * 10) / 10.0,
+                            composite,
                             u.getStreakDays(),
                             u.getTag().name(),
                             todayStatus,
@@ -74,6 +83,9 @@ public class RankService {
                 })
                 .toList();
 
+        List<RankDtos.MemberStatus> byComposite = list.stream()
+                .sorted(Comparator.comparing(RankDtos.MemberStatus::compositeScore).reversed())
+                .toList();
         List<RankDtos.MemberStatus> byPoints = list.stream()
                 .sorted(Comparator.comparing(RankDtos.MemberStatus::points).reversed())
                 .toList();
@@ -88,6 +100,6 @@ public class RankService {
                 })
                 .orElse(null);
 
-        return new RankDtos.RankingResponse(byPoints, byStreak, luckyStarInfo);
+        return new RankDtos.RankingResponse(byComposite, byPoints, byStreak, luckyStarInfo);
     }
 }

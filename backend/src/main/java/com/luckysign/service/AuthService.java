@@ -97,11 +97,19 @@ public class AuthService {
         return toProfile(userRepository.save(user));
     }
 
+    @Transactional
+    public AuthDtos.UserProfileResponse updateAvatar(Long userId, String avatarUrl) {
+        User user = userRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
+        user.setAvatarUrl(avatarUrl);
+        return toProfile(userRepository.save(user));
+    }
+
     public static AuthDtos.UserProfileResponse toProfile(User user) {
         return new AuthDtos.UserProfileResponse(
                 user.getId(),
                 user.getNickname(),
                 user.getEmail(),
+                user.getAvatarUrl(),
                 user.getPoints(),
                 user.getTitle(),
                 user.getStreakDays(),

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -44,6 +46,7 @@ class _TodayScreenState extends State<TodayScreen> {
   Future<void> _checkin() async {
     final textCtrl = TextEditingController();
     XFile? image;
+    Uint8List? previewBytes;
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -81,7 +84,12 @@ class _TodayScreenState extends State<TodayScreen> {
                       OutlinedButton.icon(
                         onPressed: () async {
                           final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
-                          if (picked != null) setLocal(() => image = picked);
+                          if (picked == null) return;
+                          final bytes = await picked.readAsBytes();
+                          setLocal(() {
+                            image = picked;
+                            previewBytes = bytes;
+                          });
                         },
                         icon: const Icon(Icons.photo_outlined),
                         label: Text(image == null ? '相册' : '已选图'),
@@ -90,13 +98,32 @@ class _TodayScreenState extends State<TodayScreen> {
                       OutlinedButton.icon(
                         onPressed: () async {
                           final picked = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
-                          if (picked != null) setLocal(() => image = picked);
+                          if (picked == null) return;
+                          final bytes = await picked.readAsBytes();
+                          setLocal(() {
+                            image = picked;
+                            previewBytes = bytes;
+                          });
                         },
                         icon: const Icon(Icons.photo_camera_outlined),
                         label: const Text('拍照'),
                       ),
+                      if (image != null) ...[
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () => setLocal(() {
+                            image = null;
+                            previewBytes = null;
+                          }),
+                          child: const Text('清除'),
+                        ),
+                      ],
                     ],
                   ),
+                  if (previewBytes != null) ...[
+                    const SizedBox(height: 12),
+                    LocalImagePreview(bytes: previewBytes!),
+                  ],
                   const SizedBox(height: 18),
                   SizedBox(
                     width: double.infinity,
@@ -261,6 +288,14 @@ class _TodayScreenState extends State<TodayScreen> {
                         ),
                       ],
                     ),
+                    if (completed && (d['textContent']?.toString().isNotEmpty ?? false)) ...[
+                      const SizedBox(height: 12),
+                      Text(d['textContent'].toString(), style: const TextStyle(color: Color(0xFF6B625A), height: 1.35)),
+                    ],
+                    if (completed && imageFullUrl(d['imageUrl']?.toString()).isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      NetworkImageBox(url: imageFullUrl(d['imageUrl']?.toString())),
+                    ],
                   ],
                 ),
               ),

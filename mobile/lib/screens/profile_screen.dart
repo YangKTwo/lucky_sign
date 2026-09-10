@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../main.dart';
 import '../services/api_client.dart';
@@ -43,6 +44,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _changeAvatar() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null) return;
+    try {
+      final res = await ApiClient.instance.uploadAvatar(picked);
+      if (!mounted) return;
+      setState(() => _profile = res['data'] as Map<String, dynamic>);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('头像已更新')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
     }
   }
 
@@ -147,7 +164,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
               ),
             if (p != null) ...[
-              _ProfileHeader(profile: p, onEdit: _editNickname),
+              _ProfileHeader(profile: p, onEdit: _editNickname, onAvatar: _changeAvatar),
               if (p['tag'] == 'DORMANT') ...[
                 const SizedBox(height: 14),
                 Container(
@@ -221,9 +238,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 }
 
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader({required this.profile, required this.onEdit});
+  const _ProfileHeader({required this.profile, required this.onEdit, required this.onAvatar});
   final Map<String, dynamic> profile;
   final VoidCallback onEdit;
+  final VoidCallback onAvatar;
 
   @override
   Widget build(BuildContext context) {
@@ -231,6 +249,7 @@ class _ProfileHeader extends StatelessWidget {
     final title = profile['title']?.toString() ?? '';
     final email = profile['email']?.toString() ?? '';
     final tag = profile['tag']?.toString();
+    final avatarUrl = profile['avatarUrl']?.toString();
 
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
@@ -248,12 +267,21 @@ class _ProfileHeader extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 34,
-                backgroundColor: Colors.white.withValues(alpha: 0.18),
-                child: Text(
-                  avatarLetter(nickname),
-                  style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800),
+              GestureDetector(
+                onTap: onAvatar,
+                child: Stack(
+                  children: [
+                    UserAvatar(nickname: nickname, avatarUrl: avatarUrl, radius: 34),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                        child: const Icon(Icons.camera_alt, size: 14, color: AppColors.moss),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 14),
@@ -291,6 +319,8 @@ class _ProfileHeader extends StatelessWidget {
                         Text(email, style: TextStyle(color: Colors.white.withValues(alpha: 0.72), fontSize: 12)),
                       ],
                     ),
+                    const SizedBox(height: 6),
+                    const Text('点头像可更换图片', style: TextStyle(color: Colors.white54, fontSize: 11)),
                   ],
                 ),
               ),
@@ -309,9 +339,13 @@ class _HistoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final level = item['level']?.toString();
+    final img = imageFullUrl(item['imageUrl']?.toString());
+    final avg = item['avgScore'];
+    final count = item['ratingCount'] is num ? (item['ratingCount'] as num).toInt() : 0;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 48,
@@ -342,6 +376,14 @@ class _HistoryRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 12, color: Color(0xFF8A8078), height: 1.3),
                 ),
+                if (count > 0) ...[
+                  const SizedBox(height: 4),
+                  Text('成员均分 $avg（$count 人）', style: const TextStyle(fontSize: 11, color: AppColors.accent)),
+                ],
+                if (img.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  NetworkImageBox(url: img, height: 96),
+                ],
               ],
             ),
           ),

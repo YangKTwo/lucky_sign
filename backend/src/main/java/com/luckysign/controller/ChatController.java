@@ -19,7 +19,7 @@ public class ChatController {
     public ApiResponse<ChatDtos.HistoryResponse> history(
             @RequestParam(required = false) Long beforeId,
             @RequestParam(defaultValue = "30") int size) {
-        return ApiResponse.ok(chatService.history(beforeId, size));
+        return ApiResponse.ok(chatService.history(AuthSupport.currentUserId(), beforeId, size));
     }
 
     @PostMapping("/messages")

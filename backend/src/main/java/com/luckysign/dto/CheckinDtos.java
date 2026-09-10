@@ -20,7 +20,9 @@ public class CheckinDtos {
             Integer points,
             String title,
             Integer streakDays,
-            String tag
+            String tag,
+            String imageUrl,
+            String textContent
     ) {
     }
 
@@ -30,7 +32,9 @@ public class CheckinDtos {
             String taskContent,
             Integer pointsEarned,
             String textContent,
-            String imageUrl
+            String imageUrl,
+            Double avgScore,
+            Integer ratingCount
     ) {
     }
 

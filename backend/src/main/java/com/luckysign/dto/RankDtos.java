@@ -6,8 +6,11 @@ public class RankDtos {
     public record MemberStatus(
             Long userId,
             String nickname,
+            String avatarUrl,
             String title,
             Integer points,
+            Double peerAvgScore,
+            Integer compositeScore,
             Integer streakDays,
             String tag,
             String todayStatus,
@@ -16,6 +19,7 @@ public class RankDtos {
     }
 
     public record RankingResponse(
+            List<MemberStatus> byComposite,
             List<MemberStatus> byPoints,
             List<MemberStatus> byStreak,
             LuckyStarInfo luckyStar

@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../config.dart';
@@ -59,5 +62,129 @@ class StatTile extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class UserAvatar extends StatelessWidget {
+  const UserAvatar({
+    super.key,
+    required this.nickname,
+    this.avatarUrl,
+    this.radius = 20,
+    this.backgroundColor,
+  });
+
+  final String? nickname;
+  final String? avatarUrl;
+  final double radius;
+  final Color? backgroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = imageFullUrl(avatarUrl);
+    final bg = backgroundColor ?? AppColors.moss;
+    final letter = Text(
+      avatarLetter(nickname),
+      style: TextStyle(color: Colors.white, fontSize: radius * 0.85, fontWeight: FontWeight.w800),
+    );
+    if (url.isEmpty) {
+      return CircleAvatar(radius: radius, backgroundColor: bg, child: letter);
+    }
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: bg,
+      child: ClipOval(
+        child: Image.network(
+          url,
+          width: radius * 2,
+          height: radius * 2,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => SizedBox(
+            width: radius * 2,
+            height: radius * 2,
+            child: ColoredBox(color: bg, child: Center(child: letter)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class NetworkImageBox extends StatelessWidget {
+  const NetworkImageBox({
+    super.key,
+    required this.url,
+    this.height = 160,
+    this.width = double.infinity,
+    this.borderRadius = 12,
+  });
+
+  final String url;
+  final double height;
+  final double? width;
+  final double borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    if (url.isEmpty) return const SizedBox.shrink();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: Image.network(
+        url,
+        height: height,
+        width: width,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return Container(
+            height: height,
+            width: width,
+            alignment: Alignment.center,
+            color: const Color(0xFFF3EEE7),
+            child: const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        },
+        errorBuilder: (_, __, ___) => Container(
+          height: height,
+          width: width,
+          alignment: Alignment.center,
+          color: const Color(0xFFF3EEE7),
+          child: const Text('图片加载失败', style: TextStyle(color: Color(0xFF8A8078), fontSize: 12)),
+        ),
+      ),
+    );
+  }
+}
+
+class LocalImagePreview extends StatelessWidget {
+  const LocalImagePreview({super.key, required this.bytes, this.height = 140});
+  final Uint8List bytes;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.memory(bytes, height: height, width: double.infinity, fit: BoxFit.cover),
+    );
+  }
+}
+
+/// 仅非 Web 平台可用的文件预览兜底。
+Widget? localFilePreview(String path, {double height = 140}) {
+  if (kIsWeb) return null;
+  try {
+    final file = File(path);
+    if (!file.existsSync()) return null;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.file(file, height: height, width: double.infinity, fit: BoxFit.cover),
+    );
+  } catch (_) {
+    return null;
   }
 }

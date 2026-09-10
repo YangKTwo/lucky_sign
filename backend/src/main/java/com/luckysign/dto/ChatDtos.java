@@ -10,11 +10,15 @@ public class ChatDtos {
             Long id,
             Long userId,
             String nickname,
+            String avatarUrl,
             ChatMessageType type,
             String content,
             String imageUrl,
             Long checkinId,
-            Instant createdAt
+            Instant createdAt,
+            Double avgScore,
+            Integer ratingCount,
+            Integer myScore
     ) {
     }
 

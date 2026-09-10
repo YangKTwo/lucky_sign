@@ -42,6 +42,9 @@ public class User {
     @Column(nullable = false)
     private Integer missStreakDays = 0;
 
+    @Column(length = 512)
+    private String avatarUrl;
+
     private LocalDate lastCheckinDate;
 
     @Enumerated(EnumType.STRING)

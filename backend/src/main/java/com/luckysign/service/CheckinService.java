@@ -5,6 +5,7 @@ import com.luckysign.domain.DrawStatus;
 import com.luckysign.domain.PointChangeType;
 import com.luckysign.domain.UserTag;
 import com.luckysign.dto.CheckinDtos;
+import com.luckysign.dto.RatingDtos;
 import com.luckysign.entity.CheckinRecord;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.entity.PointsLog;
@@ -19,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class CheckinService {
@@ -30,6 +32,7 @@ public class CheckinService {
     private final TitleService titleService;
     private final ChatService chatService;
     private final FileStorageService fileStorageService;
+    private final RatingService ratingService;
 
     public CheckinService(UserRepository userRepository,
                           DailyDrawRepository dailyDrawRepository,
@@ -38,7 +41,8 @@ public class CheckinService {
                           DrawService drawService,
                           TitleService titleService,
                           ChatService chatService,
-                          FileStorageService fileStorageService) {
+                          FileStorageService fileStorageService,
+                          RatingService ratingService) {
         this.userRepository = userRepository;
         this.dailyDrawRepository = dailyDrawRepository;
         this.checkinRecordRepository = checkinRecordRepository;
@@ -47,6 +51,7 @@ public class CheckinService {
         this.titleService = titleService;
         this.chatService = chatService;
         this.fileStorageService = fileStorageService;
+        this.ratingService = ratingService;
     }
 
     @Transactional
@@ -121,19 +126,26 @@ public class CheckinService {
         record = checkinRecordRepository.save(record);
 
         chatService.postCheckin(user, record, draw);
-        return toToday(user, draw);
+        return toToday(user, draw, record.getImageUrl(), record.getTextContent());
     }
 
     public CheckinDtos.HistoryResponse history(Long userId) {
-        List<CheckinDtos.HistoryItem> items = checkinRecordRepository.findByUserIdOrderByCheckinDateDesc(userId)
-                .stream()
-                .map(r -> new CheckinDtos.HistoryItem(
-                        r.getCheckinDate(),
-                        r.getLevel(),
-                        r.getTaskContent(),
-                        r.getPointsEarned(),
-                        r.getTextContent(),
-                        r.getImageUrl()))
+        List<CheckinRecord> records = checkinRecordRepository.findByUserIdOrderByCheckinDateDesc(userId);
+        Map<Long, RatingDtos.RatingSummary> ratings = ratingService.summaries(
+                records.stream().map(CheckinRecord::getId).toList(), userId);
+        List<CheckinDtos.HistoryItem> items = records.stream()
+                .map(r -> {
+                    RatingDtos.RatingSummary s = ratings.get(r.getId());
+                    return new CheckinDtos.HistoryItem(
+                            r.getCheckinDate(),
+                            r.getLevel(),
+                            r.getTaskContent(),
+                            r.getPointsEarned(),
+                            r.getTextContent(),
+                            r.getImageUrl(),
+                            s == null ? null : s.avgScore(),
+                            s == null ? 0 : s.ratingCount());
+                })
                 .toList();
         return new CheckinDtos.HistoryResponse(items);
     }
@@ -158,6 +170,19 @@ public class CheckinService {
     }
 
     private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw) {
+        String imageUrl = null;
+        String textContent = null;
+        if (draw.getStatus() == DrawStatus.COMPLETED) {
+            var record = checkinRecordRepository.findByUserIdAndCheckinDate(user.getId(), draw.getDrawDate());
+            if (record.isPresent()) {
+                imageUrl = record.get().getImageUrl();
+                textContent = record.get().getTextContent();
+            }
+        }
+        return toToday(user, draw, imageUrl, textContent);
+    }
+
+    private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw, String imageUrl, String textContent) {
         return new CheckinDtos.TodayResponse(
                 draw.getDrawDate(),
                 draw.getLevel(),
@@ -171,7 +196,9 @@ public class CheckinService {
                 user.getPoints(),
                 user.getTitle(),
                 user.getStreakDays(),
-                user.getTag().name()
+                user.getTag().name(),
+                imageUrl,
+                textContent
         );
     }
 }

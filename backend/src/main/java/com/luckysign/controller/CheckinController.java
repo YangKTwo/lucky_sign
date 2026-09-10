@@ -2,8 +2,10 @@ package com.luckysign.controller;
 
 import com.luckysign.common.ApiResponse;
 import com.luckysign.dto.CheckinDtos;
+import com.luckysign.dto.RatingDtos;
 import com.luckysign.security.AuthSupport;
 import com.luckysign.service.CheckinService;
+import com.luckysign.service.RatingService;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -12,9 +14,11 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/api/checkin")
 public class CheckinController {
     private final CheckinService checkinService;
+    private final RatingService ratingService;
 
-    public CheckinController(CheckinService checkinService) {
+    public CheckinController(CheckinService checkinService, RatingService ratingService) {
         this.checkinService = checkinService;
+        this.ratingService = ratingService;
     }
 
     @GetMapping("/today")
@@ -37,5 +41,12 @@ public class CheckinController {
     @GetMapping("/streak")
     public ApiResponse<Integer> streak() {
         return ApiResponse.ok(checkinService.today(AuthSupport.currentUserId()).streakDays());
+    }
+
+    @PostMapping("/{checkinId}/rate")
+    public ApiResponse<RatingDtos.RatingSummary> rate(
+            @PathVariable Long checkinId,
+            @RequestBody RatingDtos.RateRequest request) {
+        return ApiResponse.ok(ratingService.rate(AuthSupport.currentUserId(), checkinId, request.score()));
     }
 }

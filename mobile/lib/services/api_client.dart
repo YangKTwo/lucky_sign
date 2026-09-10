@@ -97,6 +97,26 @@ class ApiClient {
     return _decode(res);
   }
 
+  Future<Map<String, dynamic>> uploadAvatar(XFile image) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/api/user/avatar'));
+    if (_token != null) req.headers['Authorization'] = 'Bearer $_token';
+    final bytes = await image.readAsBytes();
+    final filename = _imageFilename(image);
+    req.files.add(http.MultipartFile.fromBytes(
+      'image',
+      bytes,
+      filename: filename,
+      contentType: _imageMediaType(image, filename),
+    ));
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    return _decode(res);
+  }
+
+  Future<Map<String, dynamic>> rateCheckin(int checkinId, int score) async {
+    return postJson('/api/checkin/$checkinId/rate', {'score': score});
+  }
+
   Map<String, dynamic> _decode(http.Response res) {
     final map = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     if (res.statusCode >= 400 || map['success'] == false) {

@@ -4,6 +4,7 @@ import com.luckysign.common.BizException;
 import com.luckysign.domain.ChatMessageType;
 import com.luckysign.domain.UserTag;
 import com.luckysign.dto.ChatDtos;
+import com.luckysign.dto.RatingDtos;
 import com.luckysign.entity.ChatMessage;
 import com.luckysign.entity.CheckinRecord;
 import com.luckysign.entity.Circle;
@@ -20,6 +21,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class ChatService {
@@ -27,15 +32,18 @@ public class ChatService {
     private final CircleRepository circleRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final RatingService ratingService;
 
     public ChatService(ChatMessageRepository chatMessageRepository,
                        CircleRepository circleRepository,
                        UserRepository userRepository,
-                       SimpMessagingTemplate messagingTemplate) {
+                       SimpMessagingTemplate messagingTemplate,
+                       RatingService ratingService) {
         this.chatMessageRepository = chatMessageRepository;
         this.circleRepository = circleRepository;
         this.userRepository = userRepository;
         this.messagingTemplate = messagingTemplate;
+        this.ratingService = ratingService;
     }
 
     public Circle defaultCircle() {
@@ -43,7 +51,7 @@ public class ChatService {
                 .orElseThrow(() -> new BizException("默认圈子未初始化"));
     }
 
-    public ChatDtos.HistoryResponse history(Long beforeId, int size) {
+    public ChatDtos.HistoryResponse history(Long viewerUserId, Long beforeId, int size) {
         Circle circle = defaultCircle();
         int limit = Math.min(Math.max(size, 1), 50);
         List<ChatMessage> list;
@@ -52,7 +60,12 @@ public class ChatService {
         } else {
             list = chatMessageRepository.findByCircleIdAndIdLessThanOrderByIdDesc(circle.getId(), beforeId, PageRequest.of(0, limit));
         }
-        List<ChatDtos.MessageView> views = new ArrayList<>(list.stream().map(this::toView).toList());
+        List<Long> checkinIds = list.stream().map(ChatMessage::getCheckinId).filter(Objects::nonNull).toList();
+        Map<Long, RatingDtos.RatingSummary> ratings = ratingService.summaries(checkinIds, viewerUserId);
+        Map<Long, User> users = loadUsers(list);
+        List<ChatDtos.MessageView> views = new ArrayList<>(list.stream()
+                .map(m -> toView(m, users.get(m.getUserId()), ratings.get(m.getCheckinId())))
+                .toList());
         Collections.reverse(views);
         return new ChatDtos.HistoryResponse(views);
     }
@@ -77,7 +90,7 @@ public class ChatService {
         msg.setType(ChatMessageType.TEXT);
         msg.setContent(content.trim());
         msg = chatMessageRepository.save(msg);
-        ChatDtos.MessageView view = toView(msg);
+        ChatDtos.MessageView view = toView(msg, user, null);
         messagingTemplate.convertAndSend("/topic/chat", view);
         return view;
     }
@@ -99,7 +112,7 @@ public class ChatService {
         msg.setImageUrl(record.getImageUrl());
         msg.setCheckinId(record.getId());
         msg = chatMessageRepository.save(msg);
-        messagingTemplate.convertAndSend("/topic/chat", toView(msg));
+        messagingTemplate.convertAndSend("/topic/chat", toView(msg, user, null));
     }
 
     @Transactional
@@ -110,19 +123,31 @@ public class ChatService {
         msg.setType(ChatMessageType.SYSTEM);
         msg.setContent(content);
         msg = chatMessageRepository.save(msg);
-        messagingTemplate.convertAndSend("/topic/chat", toView(msg));
+        messagingTemplate.convertAndSend("/topic/chat", toView(msg, null, null));
     }
 
-    private ChatDtos.MessageView toView(ChatMessage msg) {
+    private Map<Long, User> loadUsers(List<ChatMessage> list) {
+        List<Long> ids = list.stream().map(ChatMessage::getUserId).filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return userRepository.findAllById(ids).stream().collect(Collectors.toMap(User::getId, Function.identity()));
+    }
+
+    private ChatDtos.MessageView toView(ChatMessage msg, User user, RatingDtos.RatingSummary rating) {
         return new ChatDtos.MessageView(
                 msg.getId(),
                 msg.getUserId(),
                 msg.getNickname(),
+                user == null ? null : user.getAvatarUrl(),
                 msg.getType(),
                 msg.getContent(),
                 msg.getImageUrl(),
                 msg.getCheckinId(),
-                msg.getCreatedAt()
+                msg.getCreatedAt(),
+                rating == null ? null : rating.avgScore(),
+                rating == null ? 0 : rating.ratingCount(),
+                rating == null ? null : rating.myScore()
         );
     }
 }

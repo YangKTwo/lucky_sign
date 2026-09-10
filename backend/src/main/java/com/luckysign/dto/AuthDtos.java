@@ -25,6 +25,7 @@ public class AuthDtos {
             Long id,
             String nickname,
             String email,
+            String avatarUrl,
             Integer points,
             String title,
             Integer streakDays,

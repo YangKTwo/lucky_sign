@@ -102,6 +102,27 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _rate(Map<String, dynamic> m, int score) async {
+    final checkinId = m['checkinId'];
+    final id = checkinId is int ? checkinId : (checkinId is num ? checkinId.toInt() : null);
+    if (id == null) return;
+    try {
+      final res = await ApiClient.instance.rateCheckin(id, score);
+      if (!mounted) return;
+      final data = res['data'] as Map<String, dynamic>;
+      setState(() {
+        m['avgScore'] = data['avgScore'];
+        m['ratingCount'] = data['ratingCount'];
+        m['myScore'] = data['myScore'];
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+  }
+
   bool _isMine(Map<String, dynamic> m) {
     final uid = m['userId'];
     if (_myUserId == null || uid == null) return false;
@@ -172,6 +193,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final name = m['nickname']?.toString() ?? '系统';
     final content = m['content']?.toString() ?? '';
     final img = imageFullUrl(m['imageUrl']?.toString());
+    final avatarUrl = m['avatarUrl']?.toString();
 
     if (type == 'SYSTEM') {
       return Padding(
@@ -188,10 +210,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final mine = _isMine(m);
     final checkin = type == 'CHECKIN';
-    final avatar = CircleAvatar(
+    final avatar = UserAvatar(
+      nickname: name,
+      avatarUrl: avatarUrl,
       backgroundColor: checkin ? AppColors.gold : (mine ? AppColors.accent : AppColors.moss),
-      child: Text(avatarLetter(name), style: const TextStyle(color: Colors.white)),
     );
+    final avg = m['avgScore'];
+    final count = m['ratingCount'] is num ? (m['ratingCount'] as num).toInt() : 0;
+    final myScore = m['myScore'] is num ? (m['myScore'] as num).toInt() : null;
+
     final bubble = Container(
       constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.72),
       padding: const EdgeInsets.all(12),
@@ -214,8 +241,7 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Column(
         crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          if (checkin)
-            const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+          if (checkin) const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
           if (checkin) const SizedBox(height: 4),
           Text(
             content,
@@ -224,10 +250,50 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           if (img.isNotEmpty) ...[
             const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(img, height: 160, width: double.infinity, fit: BoxFit.cover),
-            ),
+            NetworkImageBox(url: img),
+          ],
+          if (checkin && m['checkinId'] != null) ...[
+            const SizedBox(height: 10),
+            if (count > 0)
+              Text(
+                '成员均分 ${avg ?? '-'}（$count 人）',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF8A8078), fontWeight: FontWeight.w600),
+              ),
+            if (!mine) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 4,
+                children: List.generate(5, (i) {
+                  final score = i + 1;
+                  final selected = myScore == score;
+                  return InkWell(
+                    onTap: () => _rate(m, score),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: selected ? AppColors.accent : const Color(0xFFFFF8F0),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: selected ? AppColors.accent : const Color(0xFFE7DDD2)),
+                      ),
+                      child: Text(
+                        '$score',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: selected ? Colors.white : AppColors.ink,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                myScore == null ? '给这次打卡打个分' : '已评 $myScore 分，可改',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF8A8078)),
+              ),
+            ],
           ],
         ],
       ),
