@@ -93,7 +93,7 @@ class _RankScreenState extends State<RankScreen> {
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Text(
-                '综合分 = 任务积分 + 成员互评均分×2',
+                '综合分 = 任务积分 + 全员评完后的互评均分×2',
                 style: TextStyle(fontSize: 12, color: Color(0xFF8A8078)),
               ),
             ),

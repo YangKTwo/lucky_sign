@@ -117,6 +117,10 @@ class ApiClient {
     return postJson('/api/checkin/$checkinId/rate', {'score': score});
   }
 
+  Future<Map<String, dynamic>> checkinDetail(int checkinId) async {
+    return getJson('/api/checkin/$checkinId');
+  }
+
   Map<String, dynamic> _decode(http.Response res) {
     final map = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     if (res.statusCode >= 400 || map['success'] == false) {
