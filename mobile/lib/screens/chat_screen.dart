@@ -18,10 +18,13 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scroll = ScrollController();
   final _items = <Map<String, dynamic>>[];
   bool _loading = true;
+  int? _myUserId;
 
   @override
   void initState() {
     super.initState();
+    _myUserId = ApiClient.instance.userId;
+    _ensureMyUserId();
     _loadHistory();
     _socket.connect();
     _socket.messages.listen((msg) {
@@ -33,6 +36,20 @@ class _ChatScreenState extends State<ChatScreen> {
       });
       _jumpBottom();
     });
+  }
+
+  Future<void> _ensureMyUserId() async {
+    if (_myUserId != null) return;
+    try {
+      final res = await ApiClient.instance.getJson('/api/user/profile');
+      if (!mounted) return;
+      final id = res['data']?['id'];
+      final parsed = id is int ? id : (id is num ? id.toInt() : null);
+      if (parsed != null) {
+        await ApiClient.instance.saveUserId(parsed);
+        setState(() => _myUserId = parsed);
+      }
+    } catch (_) {}
   }
 
   void _jumpBottom() {
@@ -83,6 +100,14 @@ class _ChatScreenState extends State<ChatScreen> {
         SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
       );
     }
+  }
+
+  bool _isMine(Map<String, dynamic> m) {
+    final uid = m['userId'];
+    if (_myUserId == null || uid == null) return false;
+    if (uid is int) return uid == _myUserId;
+    if (uid is num) return uid.toInt() == _myUserId;
+    return uid.toString() == _myUserId.toString();
   }
 
   @override
@@ -161,55 +186,87 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
+    final mine = _isMine(m);
     final checkin = type == 'CHECKIN';
+    final avatar = CircleAvatar(
+      backgroundColor: checkin ? AppColors.gold : (mine ? AppColors.accent : AppColors.moss),
+      child: Text(avatarLetter(name), style: const TextStyle(color: Colors.white)),
+    );
+    final bubble = Container(
+      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.72),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: mine
+            ? (checkin ? const Color(0xFFFFF3D6) : const Color(0xFFFFE8D6))
+            : (checkin ? const Color(0xFFFFF3D6) : Colors.white),
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(mine ? 16 : 4),
+          topRight: Radius.circular(mine ? 4 : 16),
+          bottomLeft: const Radius.circular(16),
+          bottomRight: const Radius.circular(16),
+        ),
+        border: Border.all(
+          color: mine
+              ? (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE8B48A))
+              : (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE7DDD2)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          if (checkin)
+            const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+          if (checkin) const SizedBox(height: 4),
+          Text(
+            content,
+            textAlign: mine ? TextAlign.right : TextAlign.left,
+            style: const TextStyle(height: 1.35),
+          ),
+          if (img.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(img, height: 160, width: double.infinity, fit: BoxFit.cover),
+            ),
+          ],
+        ],
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
+        mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            backgroundColor: checkin ? AppColors.gold : AppColors.moss,
-            child: Text(avatarLetter(name), style: const TextStyle(color: Colors.white)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
-                const SizedBox(height: 4),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: checkin ? const Color(0xFFFFF3D6) : Colors.white,
-                    borderRadius: const BorderRadius.only(
-                      topRight: Radius.circular(16),
-                      bottomLeft: Radius.circular(16),
-                      bottomRight: Radius.circular(16),
-                    ),
-                    border: Border.all(color: checkin ? const Color(0xFFE8C96A) : const Color(0xFFE7DDD2)),
+        children: mine
+            ? [
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
+                      const SizedBox(height: 4),
+                      bubble,
+                    ],
                   ),
+                ),
+                const SizedBox(width: 10),
+                avatar,
+              ]
+            : [
+                avatar,
+                const SizedBox(width: 10),
+                Flexible(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (checkin) const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-                      if (checkin) const SizedBox(height: 4),
-                      Text(content, style: const TextStyle(height: 1.35)),
-                      if (img.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(img, height: 160, width: double.infinity, fit: BoxFit.cover),
-                        ),
-                      ],
+                      Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
+                      const SizedBox(height: 4),
+                      bubble,
                     ],
                   ),
                 ),
               ],
-            ),
-          ),
-        ],
       ),
     );
   }

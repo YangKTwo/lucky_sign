@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -11,10 +12,12 @@ class ApiClient {
   static final ApiClient instance = ApiClient._();
 
   String? _token;
+  int? _userId;
 
   Future<void> loadToken() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('token');
+    _userId = prefs.getInt('userId');
   }
 
   Future<void> saveToken(String? token) async {
@@ -22,12 +25,25 @@ class ApiClient {
     final prefs = await SharedPreferences.getInstance();
     if (token == null) {
       await prefs.remove('token');
+      await prefs.remove('userId');
+      _userId = null;
     } else {
       await prefs.setString('token', token);
     }
   }
 
+  Future<void> saveUserId(int? userId) async {
+    _userId = userId;
+    final prefs = await SharedPreferences.getInstance();
+    if (userId == null) {
+      await prefs.remove('userId');
+    } else {
+      await prefs.setInt('userId', userId);
+    }
+  }
+
   String? get token => _token;
+  int? get userId => _userId;
   bool get isLoggedIn => _token != null && _token!.isNotEmpty;
 
   Map<String, String> _headers({bool json = true}) {
@@ -68,8 +84,13 @@ class ApiClient {
     }
     if (image != null) {
       final bytes = await image.readAsBytes();
-      final filename = image.name.isNotEmpty ? image.name : 'checkin.jpg';
-      req.files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
+      final filename = _imageFilename(image);
+      req.files.add(http.MultipartFile.fromBytes(
+        'image',
+        bytes,
+        filename: filename,
+        contentType: _imageMediaType(image, filename),
+      ));
     }
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
@@ -82,5 +103,29 @@ class ApiClient {
       throw Exception(map['message']?.toString() ?? '请求失败');
     }
     return map;
+  }
+
+  String _imageFilename(XFile image) {
+    final name = image.name.trim();
+    if (name.isNotEmpty && name.contains('.')) return name;
+    final mime = image.mimeType?.toLowerCase() ?? '';
+    if (mime.contains('png')) return 'checkin.png';
+    if (mime.contains('webp')) return 'checkin.webp';
+    return 'checkin.jpg';
+  }
+
+  MediaType _imageMediaType(XFile image, String filename) {
+    final mime = image.mimeType?.toLowerCase().split(';').first.trim();
+    if (mime != null && mime.startsWith('image/')) {
+      final parts = mime.split('/');
+      if (parts.length == 2 && parts[1].isNotEmpty) {
+        final subtype = parts[1] == 'jpg' ? 'jpeg' : parts[1];
+        return MediaType('image', subtype);
+      }
+    }
+    final lower = filename.toLowerCase();
+    if (lower.endsWith('.png')) return MediaType('image', 'png');
+    if (lower.endsWith('.webp')) return MediaType('image', 'webp');
+    return MediaType('image', 'jpeg');
   }
 }

@@ -41,8 +41,16 @@ class _LoginScreenState extends State<LoginScreen> {
         if (_registerMode) 'nickname': _nickname.text.trim(),
       };
       final res = await ApiClient.instance.postJson(path, body);
-      final token = res['data']['token'] as String;
+      final data = res['data'] as Map<String, dynamic>;
+      final token = data['token'] as String;
+      final profile = data['profile'] as Map<String, dynamic>?;
       await ApiClient.instance.saveToken(token);
+      final id = profile?['id'];
+      if (id is int) {
+        await ApiClient.instance.saveUserId(id);
+      } else if (id is num) {
+        await ApiClient.instance.saveUserId(id.toInt());
+      }
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeShell()),

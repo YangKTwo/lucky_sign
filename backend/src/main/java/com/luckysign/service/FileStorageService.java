@@ -23,10 +23,11 @@ public class FileStorageService {
     }
 
     public String save(MultipartFile file) {
-        if (file.getContentType() == null || !ALLOWED.contains(file.getContentType().toLowerCase())) {
+        String contentType = resolveContentType(file);
+        if (contentType == null || !ALLOWED.contains(contentType)) {
             throw new BizException("仅支持 jpg/png/webp 图片");
         }
-        String ext = switch (file.getContentType().toLowerCase()) {
+        String ext = switch (contentType) {
             case "image/png" -> ".png";
             case "image/webp" -> ".webp";
             default -> ".jpg";
@@ -39,5 +40,34 @@ public class FileStorageService {
         } catch (IOException e) {
             throw new BizException("图片保存失败");
         }
+    }
+
+    /** Content-Type 缺失或为 octet-stream 时，按文件名后缀推断。 */
+    private String resolveContentType(MultipartFile file) {
+        String ct = file.getContentType();
+        if (ct != null) {
+            ct = ct.toLowerCase().split(";")[0].trim();
+            if ("image/jpg".equals(ct)) {
+                ct = "image/jpeg";
+            }
+            if (ALLOWED.contains(ct)) {
+                return ct;
+            }
+        }
+        String name = file.getOriginalFilename();
+        if (name == null) {
+            return null;
+        }
+        String lower = name.toLowerCase();
+        if (lower.endsWith(".png")) {
+            return "image/png";
+        }
+        if (lower.endsWith(".webp")) {
+            return "image/webp";
+        }
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            return "image/jpeg";
+        }
+        return null;
     }
 }
