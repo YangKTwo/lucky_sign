@@ -90,61 +90,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _openFeedback() async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final submitted = await showModalBottomSheet<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('意见箱'),
-        content: SizedBox(
-          width: 320,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '想加什么功能、哪里不好用，都可以写在这里。',
-                style: TextStyle(fontSize: 13, color: Color(0xFF8A8078), height: 1.4),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ctrl,
-                maxLines: 5,
-                maxLength: 1000,
-                decoration: const InputDecoration(
-                  hintText: '写下你的想法…',
-                  alignLabelWithHint: true,
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('提交'),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
+      builder: (ctx) => const _FeedbackSheet(),
     );
-    final text = ctrl.text.trim();
-    ctrl.dispose();
-    if (ok != true) return;
-    if (text.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请填写意见内容')));
-      return;
-    }
-    try {
-      await ApiClient.instance.postJson('/api/feedback', {'content': text});
-      if (!mounted) return;
+    if (submitted == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已收到，感谢反馈')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-      );
     }
   }
 
@@ -189,6 +145,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   StatTile(label: '累计完成', value: '${p['totalCompletedDays']}'),
                 ],
               ),
+              const SizedBox(height: 16),
+              _FeedbackEntry(onTap: _openFeedback),
               const SizedBox(height: 28),
               const Row(
                 children: [
@@ -209,9 +167,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 )
               else
                 ..._history.take(30).map((h) => _HistoryRow(item: h)),
-              const SizedBox(height: 28),
-              _FeedbackEntry(onTap: _openFeedback),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 height: 48,
@@ -405,28 +361,28 @@ class _FeedbackEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: const Color(0xFFFFF8F0),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: const Color(0xFFE7DDD2)),
           ),
           child: const Row(
             children: [
-              Icon(Icons.mail_outline, color: AppColors.moss),
-              SizedBox(width: 12),
+              Icon(Icons.mail_outline, color: AppColors.moss, size: 26),
+              SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('意见箱', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                    SizedBox(height: 2),
-                    Text('提需求、吐槽、许愿都可以', style: TextStyle(fontSize: 12, color: Color(0xFF8A8078))),
+                    Text('意见箱', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                    SizedBox(height: 4),
+                    Text('提需求、吐槽、许愿都可以', style: TextStyle(fontSize: 13, color: Color(0xFF8A8078), height: 1.3)),
                   ],
                 ),
               ),
@@ -434,6 +390,121 @@ class _FeedbackEntry extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _FeedbackSheet extends StatefulWidget {
+  const _FeedbackSheet();
+
+  @override
+  State<_FeedbackSheet> createState() => _FeedbackSheetState();
+}
+
+class _FeedbackSheetState extends State<_FeedbackSheet> {
+  final _ctrl = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请填写意见内容')));
+      return;
+    }
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    try {
+      await ApiClient.instance.postJson('/api/feedback', {'content': text});
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final safe = MediaQuery.paddingOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 10, 20, 16 + bottom + safe),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(color: const Color(0xFFE0D6CC), borderRadius: BorderRadius.circular(4)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('意见箱', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          const Text(
+            '想加什么功能、哪里不好用，都可以写在这里。',
+            style: TextStyle(fontSize: 13, color: Color(0xFF8A8078), height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            minLines: 5,
+            maxLines: 8,
+            maxLength: 1000,
+            textInputAction: TextInputAction.newline,
+            decoration: const InputDecoration(
+              hintText: '写下你的想法…',
+              alignLabelWithHint: true,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _submitting ? null : () => Navigator.pop(context, false),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text('取消'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: FilledButton(
+                  onPressed: _submitting ? null : _submit,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('提交'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
