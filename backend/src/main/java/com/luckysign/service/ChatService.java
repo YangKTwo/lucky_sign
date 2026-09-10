@@ -10,9 +10,11 @@ import com.luckysign.entity.CheckinRecord;
 import com.luckysign.entity.Circle;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.entity.User;
+import com.luckysign.event.AssistantRequestedEvent;
 import com.luckysign.repository.ChatMessageRepository;
 import com.luckysign.repository.CircleRepository;
 import com.luckysign.repository.UserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -33,17 +35,23 @@ public class ChatService {
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final RatingService ratingService;
+    private final AiAssistantService aiAssistantService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ChatService(ChatMessageRepository chatMessageRepository,
                        CircleRepository circleRepository,
                        UserRepository userRepository,
                        SimpMessagingTemplate messagingTemplate,
-                       RatingService ratingService) {
+                       RatingService ratingService,
+                       AiAssistantService aiAssistantService,
+                       ApplicationEventPublisher eventPublisher) {
         this.chatMessageRepository = chatMessageRepository;
         this.circleRepository = circleRepository;
         this.userRepository = userRepository;
         this.messagingTemplate = messagingTemplate;
         this.ratingService = ratingService;
+        this.aiAssistantService = aiAssistantService;
+        this.eventPublisher = eventPublisher;
     }
 
     public Circle defaultCircle() {
@@ -92,6 +100,11 @@ public class ChatService {
         msg = chatMessageRepository.save(msg);
         ChatDtos.MessageView view = toView(msg, user, null);
         messagingTemplate.convertAndSend("/topic/chat", view);
+        if (aiAssistantService.isReady() && aiAssistantService.isMentioned(content)) {
+            eventPublisher.publishEvent(new AssistantRequestedEvent(
+                    user.getNickname(),
+                    aiAssistantService.extractQuestion(content.trim())));
+        }
         return view;
     }
 
@@ -121,6 +134,18 @@ public class ChatService {
         ChatMessage msg = new ChatMessage();
         msg.setCircleId(circle.getId());
         msg.setType(ChatMessageType.SYSTEM);
+        msg.setContent(content);
+        msg = chatMessageRepository.save(msg);
+        messagingTemplate.convertAndSend("/topic/chat", toView(msg, null, null));
+    }
+
+    @Transactional
+    public void postAssistant(String content) {
+        Circle circle = defaultCircle();
+        ChatMessage msg = new ChatMessage();
+        msg.setCircleId(circle.getId());
+        msg.setNickname("千问助手");
+        msg.setType(ChatMessageType.ASSISTANT);
         msg.setContent(content);
         msg = chatMessageRepository.save(msg);
         messagingTemplate.convertAndSend("/topic/chat", toView(msg, null, null));

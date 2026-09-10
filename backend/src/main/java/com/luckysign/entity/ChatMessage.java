@@ -28,7 +28,7 @@ public class ChatMessage {
     @Column(nullable = false, length = 16)
     private ChatMessageType type;
 
-    @Column(length = 1000)
+    @Column(length = 2000)
     private String content;
 
     @Column(length = 512)

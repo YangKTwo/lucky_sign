@@ -182,12 +182,22 @@ class _ChatScreenState extends State<ChatScreen> {
                       minLines: 1,
                       maxLines: 4,
                       decoration: const InputDecoration(
-                        hintText: '说点什么…',
+                        hintText: '说点什么… 或 @助手 提问',
                         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: '插入 @助手',
+                    onPressed: () {
+                      final cur = _input.text;
+                      final insert = cur.isEmpty || cur.endsWith(' ') ? '@助手 ' : ' @助手 ';
+                      _input.text = '$cur$insert';
+                      _input.selection = TextSelection.collapsed(offset: _input.text.length);
+                    },
+                    icon: const Icon(Icons.smart_toy_outlined),
+                  ),
                   IconButton.filled(
                     style: IconButton.styleFrom(backgroundColor: AppColors.accent),
                     onPressed: _send,
@@ -224,10 +234,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final mine = _isMine(m);
     final checkin = type == 'CHECKIN';
+    final assistant = type == 'ASSISTANT';
+    final displayName = assistant ? (name.isEmpty ? '千问助手' : name) : name;
     final avatar = UserAvatar(
-      nickname: name,
+      nickname: assistant ? '助' : displayName,
       avatarUrl: avatarUrl,
-      backgroundColor: checkin ? AppColors.gold : (mine ? AppColors.accent : AppColors.moss),
+      backgroundColor: assistant
+          ? const Color(0xFF5B6CFF)
+          : (checkin ? AppColors.gold : (mine ? AppColors.accent : AppColors.moss)),
     );
     final avg = m['avgScore'];
     final count = m['ratingCount'] is num ? (m['ratingCount'] as num).toInt() : 0;
@@ -246,31 +260,36 @@ class _ChatScreenState extends State<ChatScreen> {
         constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.72),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: mine
-              ? (checkin ? const Color(0xFFFFF3D6) : const Color(0xFFFFE8D6))
-              : (checkin ? const Color(0xFFFFF3D6) : Colors.white),
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(mine ? 16 : 4),
-            topRight: Radius.circular(mine ? 4 : 16),
-            bottomLeft: const Radius.circular(16),
-            bottomRight: const Radius.circular(16),
-          ),
-          border: Border.all(
-            color: mine
-                ? (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE8B48A))
-                : (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE7DDD2)),
-          ),
+        color: mine
+            ? (checkin ? const Color(0xFFFFF3D6) : const Color(0xFFFFE8D6))
+            : (assistant
+                ? const Color(0xFFEEF0FF)
+                : (checkin ? const Color(0xFFFFF3D6) : Colors.white)),
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(mine ? 16 : 4),
+          topRight: Radius.circular(mine ? 4 : 16),
+          bottomLeft: const Radius.circular(16),
+          bottomRight: const Radius.circular(16),
         ),
-        child: Column(
-          crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            if (checkin) const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-            if (checkin) const SizedBox(height: 4),
-            Text(
-              content,
-              textAlign: mine ? TextAlign.right : TextAlign.left,
-              style: const TextStyle(height: 1.35),
-            ),
+        border: Border.all(
+          color: mine
+              ? (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE8B48A))
+              : (assistant
+                  ? const Color(0xFFC9D0FF)
+                  : (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE7DDD2))),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          if (checkin) const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+          if (assistant) const Text('🤖 千问助手', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: Color(0xFF5B6CFF))),
+          if (checkin || assistant) const SizedBox(height: 4),
+          Text(
+            content,
+            textAlign: mine ? TextAlign.right : TextAlign.left,
+            style: const TextStyle(height: 1.35),
+          ),
             if (img.isNotEmpty) ...[
               const SizedBox(height: 8),
               NetworkImageBox(url: img),
@@ -300,7 +319,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
+                      Text(displayName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
                       const SizedBox(height: 4),
                       bubble,
                     ],
@@ -316,7 +335,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
+                      Text(displayName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
                       const SizedBox(height: 4),
                       bubble,
                     ],

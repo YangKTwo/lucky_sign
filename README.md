@@ -67,11 +67,38 @@ mkdir -p /www/wwwroot/lucky-api/uploads
 cat >/www/wwwroot/lucky-api/run.env <<'EOF'
 MYSQL_USER=root
 MYSQL_PASSWORD=123456
+
+# ---- 阿里云 OSS（图片/头像）----
+OSS_ENABLED=true
+OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
+OSS_ACCESS_KEY_ID=你的AccessKeyId
+OSS_ACCESS_KEY_SECRET=你的AccessKeySecret
+OSS_BUCKET=你的Bucket名
+OSS_DIR_PREFIX=lucky-sign/
+# 可选：绑定了 CDN/自定义域名时填写，如 https://img.example.com
+# OSS_PUBLIC_BASE_URL=
+
+# ---- 通义千问社区助手 ----
+AI_ENABLED=true
+AI_API_KEY=你的DashScope_API_Key
+AI_MODEL=qwen-plus
+# 可选：
+# AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+# AI_MENTION=@助手
 EOF
 chmod 600 /www/wwwroot/lucky-api/run.env
 ```
 
-`run.env` 只放在服务器，不要提交到 Git。
+`run.env` 只放在服务器，不要提交到 Git。改完后重启后端（或重新跑 Deploy backend）生效。
+
+### 配置项说明
+
+| 用途 | 填写位置 | 变量 |
+|------|----------|------|
+| OSS | 服务器 `run.env` 或 `application.yml` 的 `app.oss` | `OSS_ENABLED` / `OSS_ENDPOINT` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_BUCKET` |
+| 千问 | 同上 `app.ai` | `AI_ENABLED` / `AI_API_KEY` / `AI_MODEL` |
+
+社区里发送带 `@助手` 的消息即可触发回复（需 `AI_ENABLED=true` 且填了 Key）。
 
 ### 3. 手动触发
 
