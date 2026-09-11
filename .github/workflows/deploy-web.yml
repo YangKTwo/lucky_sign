@@ -50,6 +50,13 @@ jobs:
           }
           EOF
 
+      - name: Pack web artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -C mobile/build/web -czf dist/webapp.tar.gz .
+          test -f dist/webapp.tar.gz
+
       - name: Write link to job summary
         env:
           WEB_URL: ${{ steps.url.outputs.web_url }}
@@ -73,31 +80,34 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
-          script: |
-            mkdir -p /www/wwwroot/lucky-api/webapp /www/wwwroot/lucky-api/downloads
-            # 清空旧静态资源，避免残留 hash 文件占满磁盘
-            find /www/wwwroot/lucky-api/webapp -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          script: mkdir -p /www/wwwroot/lucky-api /www/wwwroot/lucky-api/downloads
 
-      - name: Upload web build
+      - name: Upload web tarball and link files
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
-          source: "mobile/build/web/*"
-          target: "/www/wwwroot/lucky-api/webapp/"
-          strip_components: 3
-          overwrite: true
-
-      - name: Upload latest link files
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
-          source: "dist/web-latest.txt,dist/web-latest.json"
-          target: "/www/wwwroot/lucky-api/downloads/"
+          source: "dist/webapp.tar.gz,dist/web-latest.txt,dist/web-latest.json"
+          target: "/www/wwwroot/lucky-api/"
           strip_components: 1
           overwrite: true
+
+      - name: Extract webapp
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd /www/wwwroot/lucky-api
+            rm -rf webapp
+            mkdir webapp
+            tar -xzf webapp.tar.gz -C webapp
+            rm -f webapp.tar.gz
+            mv -f web-latest.txt web-latest.json downloads/ 2>/dev/null || true
+            test -f webapp/index.html
+            echo "webapp files:" $(ls webapp | wc -l)
