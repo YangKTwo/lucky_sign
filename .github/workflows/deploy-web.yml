@@ -1,0 +1,103 @@
+name: Publish Web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Flutter web
+        working-directory: mobile
+        run: |
+          flutter pub get
+          # 挂在后端同源 /app/；API/WS 由页面自动推导
+          flutter build web --release --base-href=/app/
+
+      - name: Resolve public URL
+        id: url
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DEPLOY_HOST}" ]]; then
+            echo "DEPLOY_HOST secret is empty" >&2
+            exit 1
+          fi
+          WEB_URL="http://${DEPLOY_HOST}:8080/app/"
+          echo "web_url=${WEB_URL}" >> "$GITHUB_OUTPUT"
+          mkdir -p dist
+          printf '%s\n' "$WEB_URL" > dist/web-latest.txt
+          cat > dist/web-latest.json <<EOF
+          {
+            "url": "${WEB_URL}",
+            "updatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "run": ${{ github.run_number }}
+          }
+          EOF
+
+      - name: Write link to job summary
+        env:
+          WEB_URL: ${{ steps.url.outputs.web_url }}
+        run: |
+          {
+            echo "## Web 已发布"
+            echo ""
+            echo "iPhone / 浏览器打开："
+            echo ""
+            echo '```'
+            echo "${WEB_URL}"
+            echo '```'
+            echo ""
+            echo "Safari 可「分享 → 添加到主屏幕」。与安卓 APK 共用同一账号与数据。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Ensure remote directories
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            mkdir -p /www/wwwroot/lucky-api/webapp /www/wwwroot/lucky-api/downloads
+            # 清空旧静态资源，避免残留 hash 文件占满磁盘
+            find /www/wwwroot/lucky-api/webapp -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      - name: Upload web build
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "mobile/build/web/*"
+          target: "/www/wwwroot/lucky-api/webapp/"
+          strip_components: 3
+          overwrite: true
+
+      - name: Upload latest link files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "dist/web-latest.txt,dist/web-latest.json"
+          target: "/www/wwwroot/lucky-api/downloads/"
+          strip_components: 1
+          overwrite: true
