@@ -1,11 +1,11 @@
 {
-    "name": "lucky_sign",
-    "short_name": "lucky_sign",
+    "name": "今日幸运签",
+    "short_name": "幸运签",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFF8F0",
+    "theme_color": "#C45C26",
+    "description": "小圈子每日幸运签、打卡与社区聊天",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -1,6 +1,5 @@
-import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../config.dart';
@@ -171,20 +170,5 @@ class LocalImagePreview extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Image.memory(bytes, height: height, width: double.infinity, fit: BoxFit.cover),
     );
-  }
-}
-
-/// 仅非 Web 平台可用的文件预览兜底。
-Widget? localFilePreview(String path, {double height = 140}) {
-  if (kIsWeb) return null;
-  try {
-    final file = File(path);
-    if (!file.existsSync()) return null;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Image.file(file, height: height, width: double.infinity, fit: BoxFit.cover),
-    );
-  } catch (_) {
-    return null;
   }
 }
