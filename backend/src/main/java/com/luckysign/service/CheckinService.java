@@ -82,8 +82,18 @@ public class CheckinService {
             throw new BizException("今日任务已过期");
         }
 
+        boolean hasText = text != null && !text.trim().isEmpty();
+        boolean hasImage = image != null && !image.isEmpty();
+        if (!hasText && !hasImage) {
+            throw new BizException("请输入打卡内容或上传图片");
+        }
+        String textContent = hasText ? text.trim() : null;
+        if (textContent != null && textContent.length() > 500) {
+            throw new BizException("打卡内容不能超过 500 字");
+        }
+
         String imageUrl = null;
-        if (image != null && !image.isEmpty()) {
+        if (hasImage) {
             imageUrl = fileStorageService.save(image);
         }
 
@@ -117,7 +127,7 @@ public class CheckinService {
         record.setCheckinDate(date);
         record.setLevel(draw.getLevel());
         record.setTaskContent(draw.getTaskContent());
-        record.setTextContent(text);
+        record.setTextContent(textContent);
         record.setImageUrl(imageUrl);
         record.setPointsEarned(reward);
         record.setStreakSnapshot(newStreak);

@@ -24,11 +24,14 @@ import java.util.List;
 @EnableMethodSecurity
 public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
+    private final RateLimitFilter rateLimitFilter;
     private final List<String> corsOrigins;
 
     public SecurityConfig(JwtAuthFilter jwtAuthFilter,
+                          RateLimitFilter rateLimitFilter,
                           @Value("${app.cors.allowed-origins:*}") String corsOrigins) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.rateLimitFilter = rateLimitFilter;
         this.corsOrigins = Arrays.stream(corsOrigins.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
@@ -42,11 +45,11 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
-                        // HTTP 握手放行；STOMP CONNECT 在 WebSocketConfig 里强制 JWT
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/uploads/**", "/downloads/**", "/app", "/app/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
+                .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
@@ -59,11 +62,17 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        List<String> origins = corsOrigins.isEmpty() ? List.of("*") : corsOrigins;
+        List<String> origins;
+        if (corsOrigins.isEmpty() || corsOrigins.contains("*")) {
+            origins = List.of("http://localhost:*", "https://localhost:*");
+        } else {
+            origins = corsOrigins.stream()
+                    .filter(o -> !o.equals("*"))
+                    .toList();
+        }
         config.setAllowedOriginPatterns(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
-        // 客户端用 Bearer JWT，不依赖 Cookie；避免 * + credentials 的不安全组合
         config.setAllowCredentials(false);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

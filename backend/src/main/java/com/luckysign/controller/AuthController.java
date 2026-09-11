@@ -32,6 +32,11 @@ public class AuthController {
         return ApiResponse.ok(authService.login(request));
     }
 
+    @PostMapping("/auth/refresh")
+    public ApiResponse<AuthDtos.AuthResponse> refresh(@RequestBody AuthDtos.RefreshRequest request) {
+        return ApiResponse.ok(authService.refresh(request.refreshToken()));
+    }
+
     @GetMapping("/user/profile")
     public ApiResponse<AuthDtos.UserProfileResponse> profile() {
         return ApiResponse.ok(authService.profile(AuthSupport.currentUserId()));
@@ -43,9 +48,10 @@ public class AuthController {
     }
 
     @PutMapping("/user/password")
-    public ApiResponse<Void> changePassword(@Valid @RequestBody AuthDtos.ChangePasswordRequest request) {
-        authService.changePassword(AuthSupport.currentUserId(), request.oldPassword(), request.newPassword());
-        return ApiResponse.okMessage("密码已更新");
+    public ApiResponse<AuthDtos.AuthResponse> changePassword(@Valid @RequestBody AuthDtos.ChangePasswordRequest request) {
+        AuthDtos.AuthResponse response = authService.changePassword(
+                AuthSupport.currentUserId(), request.oldPassword(), request.newPassword());
+        return ApiResponse.ok(response);
     }
 
     @PostMapping(value = "/user/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

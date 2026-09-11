@@ -2,6 +2,8 @@ package com.luckysign.service;
 
 import com.luckysign.common.BizException;
 import com.luckysign.domain.MemberRole;
+import com.luckysign.domain.UserRole;
+import com.luckysign.domain.UserTag;
 import com.luckysign.dto.AuthDtos;
 import com.luckysign.entity.Circle;
 import com.luckysign.entity.CircleMember;
@@ -20,13 +22,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -57,10 +58,17 @@ class AuthServiceTest {
         when(userRepository.existsByEmail("a@b.com")).thenReturn(false);
         when(circleRepository.findByInviteCode("ABCDEF")).thenReturn(Optional.empty());
 
-        AuthDtos.RegisterRequest req = new AuthDtos.RegisterRequest("小明", "a@b.com", "123456", "abcdef");
+        AuthDtos.RegisterRequest req = new AuthDtos.RegisterRequest("小明", "a@b.com", "12345678", "abcdef");
         BizException ex = assertThrows(BizException.class, () -> authService.register(req));
         assertEquals("邀请码无效", ex.getMessage());
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void registerRejectsShortPassword() {
+        AuthDtos.RegisterRequest req = new AuthDtos.RegisterRequest("小明", "a@b.com", "1234567", "abcdef");
+        BizException ex = assertThrows(BizException.class, () -> authService.register(req));
+        assertEquals("密码至少 8 位", ex.getMessage());
     }
 
     @Test
@@ -73,7 +81,7 @@ class AuthServiceTest {
         when(userRepository.existsByEmail("a@b.com")).thenReturn(false);
         when(circleRepository.findByInviteCode("ABCDEF")).thenReturn(Optional.of(circle));
 
-        AuthDtos.RegisterRequest req = new AuthDtos.RegisterRequest("小明", "a@b.com", "123456", "ABCDEF");
+        AuthDtos.RegisterRequest req = new AuthDtos.RegisterRequest("小明", "a@b.com", "12345678", "ABCDEF");
         BizException ex = assertThrows(BizException.class, () -> authService.register(req));
         assertEquals("圈子已满员", ex.getMessage());
     }
@@ -85,28 +93,21 @@ class AuthServiceTest {
         circle.setInviteCode("ABCDEF");
         circle.setMaxMembers(10);
         circle.setMemberCount(3);
-        User saved = new User();
-        saved.setId(9L);
-        saved.setEmail("a@b.com");
-        saved.setNickname("小明");
-        saved.setRole(com.luckysign.domain.UserRole.USER);
-        saved.setTag(com.luckysign.domain.UserTag.NONE);
-        saved.setPoints(0);
-        saved.setTitle("签到萌新");
-        saved.setStreakDays(0);
-        saved.setTotalCompletedDays(0);
+        User saved = createTestUser(9L);
 
         when(userRepository.existsByEmail("a@b.com")).thenReturn(false);
         when(circleRepository.findByInviteCode("ABCDEF")).thenReturn(Optional.of(circle));
         when(titleService.resolve(0)).thenReturn("签到萌新");
-        when(passwordEncoder.encode("123456")).thenReturn("hash");
+        when(passwordEncoder.encode("12345678")).thenReturn("hash");
         when(userRepository.save(any(User.class))).thenReturn(saved);
         when(circleMemberRepository.existsByCircleIdAndUserId(1L, 9L)).thenReturn(false);
-        when(jwtService.generateToken(9L, "a@b.com", "USER")).thenReturn("token");
+        when(jwtService.generateAccessToken(eq(9L), eq("a@b.com"), eq(0L))).thenReturn("access-token");
+        when(jwtService.generateRefreshToken(eq(9L), eq(0L))).thenReturn("refresh-token");
 
-        AuthDtos.RegisterRequest req = new AuthDtos.RegisterRequest("小明", "a@b.com", "123456", "ab cdef");
+        AuthDtos.RegisterRequest req = new AuthDtos.RegisterRequest("小明", "a@b.com", "12345678", "ab cdef");
         AuthDtos.AuthResponse res = authService.register(req);
-        assertEquals("token", res.token());
+        assertEquals("access-token", res.token());
+        assertEquals("refresh-token", res.refreshToken());
 
         ArgumentCaptor<CircleMember> member = ArgumentCaptor.forClass(CircleMember.class);
         verify(circleMemberRepository).save(member.capture());
@@ -115,16 +116,72 @@ class AuthServiceTest {
     }
 
     @Test
+    void loginRejectsDisabledUser() {
+        User user = createTestUser(1L);
+        user.setEnabled(false);
+        when(userRepository.findByEmail("a@b.com")).thenReturn(Optional.of(user));
+
+        AuthDtos.LoginRequest req = new AuthDtos.LoginRequest("a@b.com", "12345678");
+        BizException ex = assertThrows(BizException.class, () -> authService.login(req));
+        assertEquals("账号已禁用", ex.getMessage());
+    }
+
+    @Test
     void changePasswordRequiresOldPassword() {
-        User user = new User();
-        user.setId(1L);
-        user.setPasswordHash("hash");
+        User user = createTestUser(1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("old", "hash")).thenReturn(false);
 
         BizException ex = assertThrows(BizException.class,
-                () -> authService.changePassword(1L, "old", "newpass"));
+                () -> authService.changePassword(1L, "old", "newpass12"));
         assertEquals("当前密码不正确", ex.getMessage());
         verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    void changePasswordIncrementsTokenVersion() {
+        User user = createTestUser(1L);
+        user.setTokenVersion(5L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("oldpass1", "hash")).thenReturn(true);
+        when(passwordEncoder.encode("newpass12")).thenReturn("newhash");
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(jwtService.generateAccessToken(eq(1L), eq("a@b.com"), eq(6L))).thenReturn("new-access");
+        when(jwtService.generateRefreshToken(eq(1L), eq(6L))).thenReturn("new-refresh");
+
+        AuthDtos.AuthResponse response = authService.changePassword(1L, "oldpass1", "newpass12");
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(userCaptor.capture());
+        assertEquals(6L, userCaptor.getValue().getTokenVersion());
+        assertEquals("newhash", userCaptor.getValue().getPasswordHash());
+        assertEquals("new-access", response.token());
+        assertEquals("new-refresh", response.refreshToken());
+    }
+
+    @Test
+    void invalidateTokensIncrementsVersion() {
+        when(userRepository.incrementTokenVersion(1L)).thenReturn(1);
+
+        authService.invalidateTokens(1L);
+
+        verify(userRepository).incrementTokenVersion(1L);
+    }
+
+    private User createTestUser(Long id) {
+        User user = new User();
+        user.setId(id);
+        user.setEmail("a@b.com");
+        user.setNickname("小明");
+        user.setPasswordHash("hash");
+        user.setRole(UserRole.USER);
+        user.setTag(UserTag.NONE);
+        user.setPoints(0);
+        user.setTitle("签到萌新");
+        user.setStreakDays(0);
+        user.setTotalCompletedDays(0);
+        user.setTokenVersion(0L);
+        user.setEnabled(true);
+        return user;
     }
 }

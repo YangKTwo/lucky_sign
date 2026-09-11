@@ -17,13 +17,19 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
-      ddl-auto: update
+      # Production: use 'validate' or 'none'; local dev can use 'update' via JPA_DDL_AUTO env var
+      ddl-auto: ${JPA_DDL_AUTO:validate}
     open-in-view: false
     properties:
       hibernate:
         format_sql: true
         jdbc:
           time_zone: Asia/Shanghai
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: '0'
+    locations: classpath:db/migration
   servlet:
     multipart:
       max-file-size: 5MB
@@ -42,8 +48,14 @@ spring:
 
 app:
   jwt:
-    secret: ${JWT_SECRET:lucky-sign-dev-secret-change-me-please-32bytes-min}
+    # REQUIRED: Set JWT_SECRET env var (≥32 chars). No default in production.
+    secret: ${JWT_SECRET:}
+    # Optional: previous secret for key rotation (tokens signed with old key still valid during transition)
+    secret-previous: ${JWT_SECRET_PREVIOUS:}
     expire-days: 7
+    # Short-lived access token (minutes); refresh tokens handled separately
+    access-token-minutes: ${JWT_ACCESS_MINUTES:30}
+    refresh-token-days: ${JWT_REFRESH_DAYS:30}
   cors:
     # 逗号分隔；原生 App 不依赖 CORS。Web 调试可设为 http://localhost:* 或具体域名
     allowed-origins: ${CORS_ORIGINS:*}

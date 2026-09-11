@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,23 +14,61 @@ class ApiClient {
   static final ApiClient instance = ApiClient._();
 
   String? _token;
+  String? _refreshToken;
   int? _userId;
 
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+
   Future<void> loadToken() async {
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      _token = prefs.getString('token');
+      _refreshToken = prefs.getString('refreshToken');
+    } else {
+      _token = await _secureStorage.read(key: 'token');
+      _refreshToken = await _secureStorage.read(key: 'refreshToken');
+    }
     final prefs = await SharedPreferences.getInstance();
-    _token = prefs.getString('token');
     _userId = prefs.getInt('userId');
   }
 
-  Future<void> saveToken(String? token) async {
+  Future<void> saveToken(String? token, {String? refreshToken}) async {
     _token = token;
-    final prefs = await SharedPreferences.getInstance();
-    if (token == null) {
-      await prefs.remove('token');
-      await prefs.remove('userId');
-      _userId = null;
+    if (refreshToken != null) {
+      _refreshToken = refreshToken;
+    }
+
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      if (token == null) {
+        await prefs.remove('token');
+        await prefs.remove('refreshToken');
+        await prefs.remove('userId');
+        _userId = null;
+        _refreshToken = null;
+      } else {
+        await prefs.setString('token', token);
+        if (refreshToken != null) {
+          await prefs.setString('refreshToken', refreshToken);
+        }
+      }
     } else {
-      await prefs.setString('token', token);
+      if (token == null) {
+        await _secureStorage.delete(key: 'token');
+        await _secureStorage.delete(key: 'refreshToken');
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('userId');
+        _userId = null;
+        _refreshToken = null;
+      } else {
+        await _secureStorage.write(key: 'token', value: token);
+        if (refreshToken != null) {
+          await _secureStorage.write(key: 'refreshToken', value: refreshToken);
+        }
+      }
     }
   }
 
@@ -43,6 +83,7 @@ class ApiClient {
   }
 
   String? get token => _token;
+  String? get refreshToken => _refreshToken;
   int? get userId => _userId;
   bool get isLoggedIn => _token != null && _token!.isNotEmpty;
 

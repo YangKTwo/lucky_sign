@@ -6,11 +6,13 @@ import com.aliyun.oss.OSSException;
 import com.luckysign.common.BizException;
 import com.luckysign.config.AppProperties;
 import jakarta.annotation.PreDestroy;
+import org.apache.tika.Tika;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -23,16 +25,22 @@ import java.util.UUID;
 @Service
 public class FileStorageService {
     private static final Logger log = LoggerFactory.getLogger(FileStorageService.class);
-    private static final Set<String> ALLOWED = Set.of("image/jpeg", "image/png", "image/jpg", "image/webp");
+    private static final Set<String> ALLOWED_MIME_TYPES = Set.of(
+            "image/jpeg", "image/png", "image/webp", "image/gif"
+    );
+    private static final long MAX_FILE_SIZE = 5 * 1024 * 1024;
+
     private final AppProperties appProperties;
     private final Path localRoot;
     private final OSS ossClient;
     private final boolean useOss;
+    private final Tika tika;
 
     public FileStorageService(AppProperties appProperties) throws IOException {
         this.appProperties = appProperties;
         this.localRoot = Paths.get(appProperties.getUpload().getDir()).toAbsolutePath().normalize();
         Files.createDirectories(this.localRoot);
+        this.tika = new Tika();
 
         AppProperties.Oss oss = appProperties.getOss();
         this.useOss = oss.isEnabled()
@@ -54,20 +62,47 @@ public class FileStorageService {
     }
 
     public String save(MultipartFile file) {
-        String contentType = resolveContentType(file);
-        if (contentType == null || !ALLOWED.contains(contentType)) {
-            throw new BizException("仅支持 jpg/png/webp 图片");
+        if (file == null || file.isEmpty()) {
+            throw new BizException("文件不能为空");
         }
-        String ext = switch (contentType) {
+        if (file.getSize() > MAX_FILE_SIZE) {
+            throw new BizException("文件大小超过限制（最大 5MB）");
+        }
+
+        String detectedMimeType = detectMimeType(file);
+        if (detectedMimeType == null || !ALLOWED_MIME_TYPES.contains(detectedMimeType)) {
+            throw new BizException("仅支持 jpg/png/webp/gif 图片");
+        }
+
+        String ext = switch (detectedMimeType) {
             case "image/png" -> ".png";
             case "image/webp" -> ".webp";
+            case "image/gif" -> ".gif";
             default -> ".jpg";
         };
         String filename = UUID.randomUUID() + ext;
+
         if (useOss) {
-            return saveToOss(file, filename, contentType);
+            return saveToOss(file, filename, detectedMimeType);
         }
         return saveLocal(file, filename);
+    }
+
+    private String detectMimeType(MultipartFile file) {
+        try (InputStream is = new BufferedInputStream(file.getInputStream())) {
+            String detected = tika.detect(is, file.getOriginalFilename());
+            if (detected == null || detected.isBlank()) {
+                return null;
+            }
+            detected = detected.toLowerCase(Locale.ROOT).split(";")[0].trim();
+            if ("image/jpg".equals(detected)) {
+                detected = "image/jpeg";
+            }
+            return detected;
+        } catch (IOException e) {
+            log.warn("Failed to detect MIME type: {}", e.getMessage());
+            return null;
+        }
     }
 
     private String saveToOss(MultipartFile file, String filename, String contentType) {
@@ -121,22 +156,8 @@ public class FileStorageService {
         }
     }
 
-    private String resolveContentType(MultipartFile file) {
-        String ct = file.getContentType();
-        if (ct == null || ct.isBlank()) {
-            // 无 MIME 时不根据扩展名猜测，避免伪造后缀绕过
-            return null;
-        }
-        ct = ct.toLowerCase(Locale.ROOT).split(";")[0].trim();
-        if ("image/jpg".equals(ct)) {
-            ct = "image/jpeg";
-        }
-        return ALLOWED.contains(ct) ? ct : null;
-    }
-
     private static String normalizeEndpoint(String endpoint) {
         String e = endpoint.trim();
-        // 误填成 bucket.oss-cn-xxx.aliyuncs.com 时剥掉 bucket 前缀
         if (e.contains(".oss-") && e.contains(".aliyuncs.com")) {
             int idx = e.indexOf(".oss-");
             if (idx > 0) {

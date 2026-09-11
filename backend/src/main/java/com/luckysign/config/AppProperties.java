@@ -23,7 +23,10 @@ public class AppProperties {
     @Setter
     public static class Jwt {
         private String secret;
+        private String secretPrevious;
         private int expireDays = 7;
+        private int accessTokenMinutes = 30;
+        private int refreshTokenDays = 30;
     }
 
     @Getter
