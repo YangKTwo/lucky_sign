@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../constants/assistant.dart';
 import '../main.dart';
@@ -34,7 +36,18 @@ class _ChatScreenState extends State<ChatScreen> {
   String _mentionQuery = '';
   int _atStart = -1;
 
+  /// 是否贴近列表底部（最新消息）。
+  bool _nearBottom = true;
+
+  /// 人不在底部时，下方积压的新消息条数（点「↓」回到最新）。
+  int _newBelowCount = 0;
+
+  /// 跳转到某条时短暂高亮。
+  int? _highlightId;
+
   static const _assistantNames = assistantMentionNames;
+  static final _timeFmt = DateFormat('HH:mm');
+  static const _weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
   @override
   void initState() {
@@ -59,7 +72,13 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void didUpdateWidget(covariant ChatScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 切回社区时保留未读/@，由右上角按钮跳到最初一条；滑到底部才标记已读。
+    // 切回社区：落到最新；上方若有未读，保留顶部提示可点跳转。
+    if (widget.isActive && !oldWidget.isActive) {
+      _scrollToLatest(animate: false);
+      if (_nearBottom) {
+        _markVisibleAsRead();
+      }
+    }
   }
 
   Future<void> _ensureMyUserId() async {
@@ -78,7 +97,6 @@ class _ChatScreenState extends State<ChatScreen> {
         if (nick != null && nick.isNotEmpty) _myNickname = nick;
       });
     } catch (e) {
-      // 个人资料拉取失败时仍可继续聊天，下次再补
       debugPrint('ensureMyUserId failed: $e');
     }
   }
@@ -113,21 +131,74 @@ class _ChatScreenState extends State<ChatScreen> {
     return int.tryParse(v?.toString() ?? '');
   }
 
-  bool _isNearBottom() {
+  DateTime? _createdAt(Map<String, dynamic> m) {
+    final raw = m['createdAt'];
+    if (raw == null) return null;
+    if (raw is int) {
+      // 秒 / 毫秒
+      final ms = raw > 20000000000 ? raw : raw * 1000;
+      return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toLocal();
+    }
+    return DateTime.tryParse(raw.toString())?.toLocal();
+  }
+
+  bool _isNearBottom({double threshold = 120}) {
     if (!_scroll.hasClients) return true;
     final pos = _scroll.position;
-    return pos.maxScrollExtent - pos.pixels <= 120;
+    return pos.maxScrollExtent - pos.pixels <= threshold;
   }
 
   void _onScroll() {
+    final near = _isNearBottom();
+    if (near != _nearBottom) {
+      setState(() => _nearBottom = near);
+    }
     if (!widget.isActive) return;
-    if (_isNearBottom()) {
-      _markVisibleAsRead();
+    if (near) {
+      if (_newBelowCount != 0) {
+        setState(() => _newBelowCount = 0);
+      }
+      // 有上方未读待跳转时，贴底不要整段清掉（否则顶部「↑未读」会立刻消失）
+      final hasCatchUp = ChatInbox.instance.unreadCount > 0 || ChatInbox.instance.mentionIds.value.isNotEmpty;
+      if (!hasCatchUp) {
+        _markVisibleAsRead();
+      }
+    } else {
+      _markUnreadsEnteredViewport();
     }
   }
 
-  Future<void> _markVisibleAsRead() async {
+  /// 向上浏览时，进入视口的未读逐条消掉。
+  void _markUnreadsEnteredViewport() {
+    if (!_scroll.hasClients) return;
+    final ids = {
+      ...ChatInbox.instance.unreadIds.value,
+      ...ChatInbox.instance.mentionIds.value,
+    };
+    if (ids.isEmpty) return;
+    var changed = false;
+    for (final id in ids) {
+      final ctx = _itemKeys[id]?.currentContext;
+      if (ctx == null || !ctx.mounted) continue;
+      final ro = ctx.findRenderObject();
+      if (ro is! RenderBox || !ro.hasSize) continue;
+      final dy = ro.localToGlobal(Offset.zero).dy;
+      final screenH = MediaQuery.sizeOf(context).height;
+      // 大致进入屏幕中部偏上，视为已看见
+      if (dy > 80 && dy < screenH * 0.75) {
+        ChatInbox.instance.remove(id);
+        changed = true;
+      }
+    }
+    if (changed && mounted) setState(() {});
+  }
+
+  Future<void> _markVisibleAsRead({bool force = false}) async {
     if (_items.isEmpty) return;
+    if (!force) {
+      final hasCatchUp = ChatInbox.instance.unreadCount > 0 || ChatInbox.instance.mentionIds.value.isNotEmpty;
+      if (hasCatchUp) return;
+    }
     final latest = _asInt(_items.last['id']);
     if (latest == null) return;
     await ChatInbox.instance.markReadThrough(latest);
@@ -142,7 +213,6 @@ class _ChatScreenState extends State<ChatScreen> {
         if (_asInt(e) == _myUserId) return true;
       }
     }
-    // 客户端兜底：正文含 @我的昵称
     final nick = _myNickname?.trim();
     final content = m['content']?.toString() ?? '';
     if (nick != null && nick.isNotEmpty && content.contains('@$nick')) {
@@ -177,33 +247,49 @@ class _ChatScreenState extends State<ChatScreen> {
             duration: const Duration(seconds: 3),
             action: SnackBarAction(
               label: '查看',
-              onPressed: () {
-                // 用户需自己切到社区；若已在社区则跳转
-                _jumpToMessage(id, markThrough: false);
-              },
+              onPressed: () => _jumpToMessage(id, markThrough: false),
             ),
           ),
         );
     }
 
     if (widget.isActive && _isNearBottom()) {
-      _jumpBottom();
+      _scrollToLatest(animate: true);
       _markVisibleAsRead();
     } else if (widget.isActive && mine) {
-      _jumpBottom();
+      _scrollToLatest(animate: true);
+      setState(() => _newBelowCount = 0);
+    } else if (!mine) {
+      setState(() => _newBelowCount += 1);
     }
     if (mounted) setState(() {});
   }
 
-  void _jumpBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent + 80,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    });
+  /// 滚到最新一条。首次进入用 jump，避免动画时高度未算完落空。
+  Future<void> _scrollToLatest({bool animate = false}) async {
+    for (var attempt = 0; attempt < 8; attempt++) {
+      await Future<void>.delayed(Duration(milliseconds: attempt == 0 ? 16 : 40));
+      if (!mounted || !_scroll.hasClients) continue;
+      final target = _scroll.position.maxScrollExtent;
+      if (animate && attempt == 0) {
+        await _scroll.animateTo(
+          target,
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+        );
+      } else {
+        _scroll.jumpTo(target);
+      }
+      if ((_scroll.position.maxScrollExtent - _scroll.position.pixels).abs() < 4) {
+        if (mounted) {
+          setState(() {
+            _nearBottom = true;
+            _newBelowCount = 0;
+          });
+        }
+        return;
+      }
+    }
   }
 
   Future<void> _jumpToMessage(int id, {required bool markThrough}) async {
@@ -213,15 +299,16 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) setState(() {});
       return;
     }
+    setState(() => _highlightId = id);
     await Future<void>.delayed(const Duration(milliseconds: 16));
     final key = _itemKeys[id];
     final ctx = key?.currentContext;
     if (ctx != null && ctx.mounted) {
       await Scrollable.ensureVisible(
         ctx,
-        duration: const Duration(milliseconds: 320),
+        duration: const Duration(milliseconds: 360),
         curve: Curves.easeOutCubic,
-        alignment: 0.2,
+        alignment: 0.25,
       );
     }
     if (markThrough) {
@@ -230,6 +317,11 @@ class _ChatScreenState extends State<ChatScreen> {
       ChatInbox.instance.remove(id);
     }
     if (mounted) setState(() {});
+    Future<void>.delayed(const Duration(milliseconds: 1200), () {
+      if (mounted && _highlightId == id) {
+        setState(() => _highlightId = null);
+      }
+    });
   }
 
   Future<void> _jumpToOldestUnreadOrMention() async {
@@ -256,7 +348,6 @@ class _ChatScreenState extends State<ChatScreen> {
           ..addAll(list);
       });
 
-      // 首次：记下当前最新为已读；否则恢复未读/@
       final latest = list.isEmpty ? null : _asInt(list.last['id']);
       if (ChatInbox.instance.lastReadId == null) {
         if (latest != null) {
@@ -274,7 +365,11 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       }
 
-      _jumpBottom();
+      // 进入会话：先落到最新；未读提示留给顶部胶囊。
+      await _scrollToLatest(animate: false);
+      if (widget.isActive && ChatInbox.instance.unreadCount == 0) {
+        await _markVisibleAsRead();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -307,7 +402,6 @@ class _ChatScreenState extends State<ChatScreen> {
     if (at > 0) {
       final prev = before[at - 1];
       if (prev.trim().isNotEmpty && prev != '\n') {
-        // 非词首的 @（如邮箱）不弹
         if (_showMentionPicker) setState(() => _showMentionPicker = false);
         return;
       }
@@ -363,13 +457,22 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       final msg = res['data'] as Map<String, dynamic>;
       setState(() => _upsertMessage(msg));
-      _jumpBottom();
+      await _scrollToLatest(animate: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(formatError(e))),
       );
     }
+  }
+
+  Future<void> _copyText(String text) async {
+    if (text.trim().isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1), behavior: SnackBarBehavior.floating),
+    );
   }
 
   Future<void> _openCheckinDetail(Map<String, dynamic> m) async {
@@ -413,6 +516,25 @@ class _ChatScreenState extends State<ChatScreen> {
     if (uid is int) return uid == _myUserId;
     if (uid is num) return uid.toInt() == _myUserId;
     return uid.toString() == _myUserId.toString();
+  }
+
+  bool _sameDay(DateTime? a, DateTime? b) {
+    if (a == null || b == null) return a == b;
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  bool _shouldShowDateHeader(int index) {
+    final cur = _createdAt(_items[index]);
+    if (cur == null) return false;
+    if (index == 0) return true;
+    return !_sameDay(cur, _createdAt(_items[index - 1]));
+  }
+
+  /// 列表里「以下为新消息」插在第一条仍未读的消息前。
+  bool _shouldShowUnreadDivider(int index) {
+    final firstId = ChatInbox.instance.oldestMention ?? ChatInbox.instance.oldestUnread;
+    if (firstId == null) return false;
+    return _asInt(_items[index]['id']) == firstId;
   }
 
   List<String> get _highlightNames {
@@ -479,11 +601,119 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  Widget _unreadJumpChip() {
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        ChatInbox.instance.unreadIds,
+        ChatInbox.instance.mentionIds,
+      ]),
+      builder: (_, __) {
+        final mentions = ChatInbox.instance.mentionIds.value;
+        final unreads = ChatInbox.instance.unreadIds.value;
+        if (mentions.isEmpty && unreads.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final isMention = mentions.isNotEmpty;
+        final count = isMention ? mentions.length : unreads.length;
+        final label = isMention
+            ? (count == 1 ? '↑ 有人@我' : '↑ 有人@我 · $count')
+            : (count > 99 ? '↑ 99+ 条未读' : '↑ $count 条未读');
+        return Material(
+          color: isMention ? const Color(0xFFFFF3D6) : Colors.white,
+          elevation: 3,
+          shadowColor: const Color(0x33000000),
+          borderRadius: BorderRadius.circular(22),
+          child: InkWell(
+            onTap: _jumpToOldestUnreadOrMention,
+            borderRadius: BorderRadius.circular(22),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isMention ? Icons.alternate_email : Icons.keyboard_arrow_up_rounded,
+                    size: 18,
+                    color: isMention ? const Color(0xFFB86A00) : const Color(0xFF2F6BFF),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                      color: isMention ? const Color(0xFFB86A00) : const Color(0xFF2F6BFF),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _scrollToLatestFab() {
+    final showNew = _newBelowCount > 0;
+    if (_nearBottom && !showNew) return const SizedBox.shrink();
+    return Material(
+      color: showNew ? AppColors.accent : Colors.white,
+      elevation: 3,
+      shadowColor: const Color(0x33000000),
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        onTap: () async {
+          await _scrollToLatest(animate: true);
+          if (widget.isActive) await _markVisibleAsRead(force: true);
+        },
+        borderRadius: BorderRadius.circular(22),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 18,
+                color: showNew ? Colors.white : const Color(0xFF5A524A),
+              ),
+              const SizedBox(width: 2),
+              Text(
+                showNew
+                    ? (_newBelowCount > 99 ? '99+ 条新消息' : '$_newBelowCount 条新消息')
+                    : '回到底部',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  color: showNew ? Colors.white : const Color(0xFF5A524A),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = _filteredMembers;
     return Scaffold(
-      appBar: AppBar(title: const Text('圈子社区')),
+      appBar: AppBar(
+        title: const Text('圈子社区'),
+        actions: [
+          if (!_loading && _items.isNotEmpty)
+            IconButton(
+              tooltip: '最新消息',
+              onPressed: () async {
+                await _scrollToLatest(animate: true);
+                if (widget.isActive) await _markVisibleAsRead(force: true);
+              },
+              icon: const Icon(Icons.vertical_align_bottom_rounded),
+            ),
+        ],
+      ),
       body: Column(
         children: [
           if (_loading) const LinearProgressIndicator(minHeight: 2),
@@ -494,56 +724,37 @@ class _ChatScreenState extends State<ChatScreen> {
                     ? const Center(child: Text('还没有消息，打个招呼吧'))
                     : ListView.builder(
                         controller: _scroll,
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
                         itemCount: _items.length,
                         itemBuilder: (_, i) {
                           final m = _items[i];
                           final id = _asInt(m['id']);
                           final key = id == null ? null : _itemKeys.putIfAbsent(id, GlobalKey.new);
-                          return KeyedSubtree(key: key, child: _bubble(m));
+                          return KeyedSubtree(
+                            key: key,
+                            child: Column(
+                              children: [
+                                if (_shouldShowDateHeader(i)) _DateSeparator(label: _formatDateLabel(_createdAt(m))),
+                                if (_shouldShowUnreadDivider(i)) const _UnreadDivider(),
+                                _bubble(m),
+                              ],
+                            ),
+                          );
                         },
                       ),
+                // 上方：跳到第一条未读 / @
                 Positioned(
-                  right: 12,
-                  top: 12,
-                  child: AnimatedBuilder(
-                    animation: Listenable.merge([
-                      ChatInbox.instance.unreadIds,
-                      ChatInbox.instance.mentionIds,
-                    ]),
-                    builder: (_, __) {
-                      final mentions = ChatInbox.instance.mentionIds.value;
-                      final unreads = ChatInbox.instance.unreadIds.value;
-                      if (mentions.isEmpty && unreads.isEmpty) {
-                        return const SizedBox.shrink();
-                      }
-                      final isMention = mentions.isNotEmpty;
-                      final count = isMention ? mentions.length : unreads.length;
-                      final label = isMention
-                          ? (count == 1 ? '有人@我' : '有人@我 · $count')
-                          : (count > 99 ? '99+ 条未读' : '$count 条未读');
-                      return Material(
-                        color: isMention ? const Color(0xFFFFF3D6) : const Color(0xFFE8F2FF),
-                        elevation: 2,
-                        borderRadius: BorderRadius.circular(20),
-                        child: InkWell(
-                          onTap: _jumpToOldestUnreadOrMention,
-                          borderRadius: BorderRadius.circular(20),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            child: Text(
-                              label,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 13,
-                                color: isMention ? const Color(0xFFB86A00) : const Color(0xFF2F6BFF),
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                  top: 10,
+                  left: 0,
+                  right: 0,
+                  child: Center(child: _unreadJumpChip()),
+                ),
+                // 下方：新消息 / 回到底部
+                Positioned(
+                  bottom: 10,
+                  left: 0,
+                  right: 0,
+                  child: Center(child: _scrollToLatestFab()),
                 ),
                 if (_showMentionPicker && filtered.isNotEmpty)
                   Positioned(
@@ -587,9 +798,14 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           SafeArea(
             top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Color(0xFFE7DDD2))),
+              ),
+              padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(
                     child: TextField(
@@ -597,17 +813,19 @@ class _ChatScreenState extends State<ChatScreen> {
                       focusNode: _focus,
                       minLines: 1,
                       maxLines: 4,
+                      textInputAction: TextInputAction.newline,
                       decoration: const InputDecoration(
-                        hintText: '说点什么… 输入 @ 可提醒成员或助手',
+                        hintText: '说点什么… 输入 @ 可提醒',
                         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        isDense: true,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   IconButton.filled(
                     style: IconButton.styleFrom(backgroundColor: AppColors.accent),
                     onPressed: _send,
-                    icon: const Icon(Icons.send),
+                    icon: const Icon(Icons.send_rounded, size: 20),
                   ),
                 ],
               ),
@@ -618,6 +836,19 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  String _formatDateLabel(DateTime? dt) {
+    if (dt == null) return '';
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(dt.year, dt.month, dt.day);
+    final diff = today.difference(day).inDays;
+    if (diff == 0) return '今天';
+    if (diff == 1) return '昨天';
+    final wd = _weekdays[(dt.weekday - 1).clamp(0, 6)];
+    if (dt.year == now.year) return '${dt.month}月${dt.day}日 $wd';
+    return '${dt.year}年${dt.month}月${dt.day}日 $wd';
+  }
+
   Widget _bubble(Map<String, dynamic> m) {
     final type = m['type']?.toString();
     final name = m['nickname']?.toString() ?? '系统';
@@ -625,6 +856,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final img = imageFullUrl(m['imageUrl']?.toString());
     final avatarUrl = m['avatarUrl']?.toString();
     final mentionedMe = _mentionsMe(m);
+    final id = _asInt(m['id']);
+    final highlighted = id != null && id == _highlightId;
+    final when = _createdAt(m);
 
     if (type == 'SYSTEM') {
       return Padding(
@@ -655,76 +889,86 @@ class _ChatScreenState extends State<ChatScreen> {
     final expected = m['expectedRaterCount'] is num ? (m['expectedRaterCount'] as num).toInt() : 0;
     final complete = m['ratingComplete'] == true;
 
-    final bubble = InkWell(
-      onTap: checkin && m['checkinId'] != null ? () => _openCheckinDetail(m) : null,
-      borderRadius: BorderRadius.only(
-        topLeft: Radius.circular(mine ? 16 : 4),
-        topRight: Radius.circular(mine ? 4 : 16),
-        bottomLeft: const Radius.circular(16),
-        bottomRight: const Radius.circular(16),
-      ),
-      child: Container(
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.72),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: mine
-              ? (checkin ? const Color(0xFFFFF3D6) : const Color(0xFFFFE8D6))
-              : (assistant
-                  ? const Color(0xFFEEF0FF)
-                  : (checkin ? const Color(0xFFFFF3D6) : Colors.white)),
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(mine ? 16 : 4),
-            topRight: Radius.circular(mine ? 4 : 16),
-            bottomLeft: const Radius.circular(16),
-            bottomRight: const Radius.circular(16),
-          ),
-          border: Border.all(
-            color: mentionedMe
-                ? const Color(0xFFFFB020)
-                : (mine
-                    ? (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE8B48A))
-                    : (assistant
-                        ? const Color(0xFFC9D0FF)
-                        : (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE7DDD2)))),
-            width: mentionedMe ? 1.5 : 1,
-          ),
+    final bubble = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: checkin && m['checkinId'] != null ? () => _openCheckinDetail(m) : null,
+        onLongPress: content.trim().isEmpty ? null : () => _copyText(content),
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(mine ? 16 : 4),
+          topRight: Radius.circular(mine ? 4 : 16),
+          bottomLeft: const Radius.circular(16),
+          bottomRight: const Radius.circular(16),
         ),
-        child: Column(
-          crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            if (checkin) const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-            if (assistant)
-              Text('🤖 $displayName', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: Color(0xFF5B6CFF))),
-            if (checkin || assistant) const SizedBox(height: 4),
-            if (assistant && content == '正在回复…')
-              const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF5B6CFF)),
-                  ),
-                  SizedBox(width: 8),
-                  Text('正在回复…', style: TextStyle(height: 1.35, color: Color(0xFF5B6CFF))),
-                ],
-              )
-            else
-              _richContent(content, mine: mine),
-            if (img.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              NetworkImageBox(url: img),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 280),
+          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.72),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: highlighted
+                ? const Color(0xFFFFF0C8)
+                : (mine
+                    ? (checkin ? const Color(0xFFFFF3D6) : const Color(0xFFFFE8D6))
+                    : (assistant
+                        ? const Color(0xFFEEF0FF)
+                        : (checkin ? const Color(0xFFFFF3D6) : Colors.white))),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(mine ? 16 : 4),
+              topRight: Radius.circular(mine ? 4 : 16),
+              bottomLeft: const Radius.circular(16),
+              bottomRight: const Radius.circular(16),
+            ),
+            border: Border.all(
+              color: mentionedMe
+                  ? const Color(0xFFFFB020)
+                  : (highlighted
+                      ? const Color(0xFFE8A838)
+                      : (mine
+                          ? (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE8B48A))
+                          : (assistant
+                              ? const Color(0xFFC9D0FF)
+                              : (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE7DDD2))))),
+              width: mentionedMe || highlighted ? 1.5 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              if (checkin) const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+              if (assistant)
+                Text('🤖 $displayName',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: Color(0xFF5B6CFF))),
+              if (checkin || assistant) const SizedBox(height: 4),
+              if (assistant && content == '正在回复…')
+                const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF5B6CFF)),
+                    ),
+                    SizedBox(width: 8),
+                    Text('正在回复…', style: TextStyle(height: 1.35, color: Color(0xFF5B6CFF))),
+                  ],
+                )
+              else
+                _richContent(content, mine: mine),
+              if (img.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                NetworkImageBox(url: img),
+              ],
+              if (checkin && m['checkinId'] != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  complete
+                      ? '全员已评 · 均分 ${avg ?? '-'}（$count 人）'
+                      : '评分进度 $count/$expected · 点击查看评分',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF8A8078), fontWeight: FontWeight.w600),
+                ),
+              ],
             ],
-            if (checkin && m['checkinId'] != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                complete
-                    ? '全员已评 · 均分 ${avg ?? '-'}（$count 人）'
-                    : '评分进度 $count/$expected · 点击查看评分',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF8A8078), fontWeight: FontWeight.w600),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -740,7 +984,18 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(displayName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (when != null) ...[
+                            Text(_timeFmt.format(when),
+                                style: const TextStyle(fontSize: 11, color: Color(0xFFA09890))),
+                            const SizedBox(width: 6),
+                          ],
+                          Text(displayName,
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
+                        ],
+                      ),
                       const SizedBox(height: 4),
                       bubble,
                     ],
@@ -756,13 +1011,75 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(displayName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(displayName,
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF6B625A))),
+                          if (when != null) ...[
+                            const SizedBox(width: 6),
+                            Text(_timeFmt.format(when),
+                                style: const TextStyle(fontSize: 11, color: Color(0xFFA09890))),
+                          ],
+                        ],
+                      ),
                       const SizedBox(height: 4),
                       bubble,
                     ],
                   ),
                 ),
               ],
+      ),
+    );
+  }
+}
+
+class _DateSeparator extends StatelessWidget {
+  const _DateSeparator({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    if (label.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEFE6DC),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF6B625A), fontWeight: FontWeight.w600)),
+        ),
+      ),
+    );
+  }
+}
+
+class _UnreadDivider extends StatelessWidget {
+  const _UnreadDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        children: [
+          const Expanded(child: Divider(color: Color(0xFFE8A838), thickness: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text(
+              '以下为新消息',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: Colors.orange.shade800,
+              ),
+            ),
+          ),
+          const Expanded(child: Divider(color: Color(0xFFE8A838), thickness: 1)),
+        ],
       ),
     );
   }
