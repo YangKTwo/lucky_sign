@@ -53,7 +53,7 @@ flutter run -d emulator-5554
    - 另有别名 `lucky-sign-latest.apk`；历史版本包保留
 
 2. **网页版（给 iPhone / 浏览器）**
-   - 构建产物同步到服务器 `webapp/`，对外地址：`http://<主机>:8080/app/`
+   - 构建产物同步到服务器 `webapp/`，对外地址：`http://<主机>/app/`（nginx 代理 80 → 8080）
    - `downloads/web-latest.txt` — 网页链接一行文本
    - 与 APK **同一后端、同一账号数据**
    - Safari 可「分享 → 添加到主屏幕」
