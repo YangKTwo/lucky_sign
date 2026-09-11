@@ -152,6 +152,8 @@ GitHub → Actions → **Deploy backend** / **Publish APK** / **Publish Web** �
 - APK：[`.github/workflows/deploy-apk.yml`](.github/workflows/deploy-apk.yml)
 - Web：[`.github/workflows/deploy-web.yml`](.github/workflows/deploy-web.yml)
 - 重启脚本：[`deploy/start-backend.sh`](deploy/start-backend.sh)
+- Nginx 反向代理（生产 HTTP）：[`deploy/nginx-lucky-api.conf`](deploy/nginx-lucky-api.conf)
+- Nginx 反向代理（TLS 示例）：[`deploy/nginx-example.conf`](deploy/nginx-example.conf)
 
 ## 说明
 
