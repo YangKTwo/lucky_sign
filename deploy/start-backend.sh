@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
+# ============================================================================
+# Lucky Sign 后端启动脚本
+# ============================================================================
+# 必须在服务器上创建 /www/wwwroot/lucky-api/run.env 并设置以下变量：
+#
+#   MYSQL_PASSWORD=<数据库密码>      # 必需，不能为空
+#   JWT_SECRET=<安全随机字符串>      # 必需，至少 32 字符
+#
+# 可选变量：
+#   MYSQL_USER        默认 root
+#   MYSQL_URL         默认 jdbc:mysql://127.0.0.1:3306/lucky_sign?...
+#   SERVER_ADDRESS    默认 127.0.0.1（通过反向代理访问）
+#   SERVER_PORT       默认 8080
+#   ADMIN_PASSWORD    首次启动管理员密码
+#
+# 生成 JWT_SECRET：openssl rand -base64 48
+# ============================================================================
 set -euo pipefail
 
 APP_DIR="/www/wwwroot/lucky-api"
