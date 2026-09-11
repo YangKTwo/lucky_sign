@@ -51,6 +51,9 @@ app:
     dir: ./uploads
   download:
     dir: ./downloads
+  web:
+    # Flutter Web 构建产物；CI 会同步到服务器 webapp/
+    dir: ./webapp
   # 阿里云 OSS：在服务器 /www/wwwroot/lucky-api/run.env 里填下面变量，或改此处
   oss:
     enabled: ${OSS_ENABLED:false}

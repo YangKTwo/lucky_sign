@@ -30,7 +30,7 @@ if [[ ! -f "${JAR_PATH}" ]]; then
   exit 1
 fi
 
-mkdir -p "${APP_DIR}/uploads" "${APP_DIR}/downloads"
+mkdir -p "${APP_DIR}/uploads" "${APP_DIR}/downloads" "${APP_DIR}/webapp"
 
 if pgrep -f "${PID_MATCH}" >/dev/null 2>&1; then
   echo "Stopping existing process..."
@@ -47,6 +47,7 @@ nohup java -jar "${JAR_PATH}" \
   --spring.datasource.password="${MYSQL_PASSWORD}" \
   --app.upload.dir="${APP_DIR}/uploads" \
   --app.download.dir="${APP_DIR}/downloads" \
+  --app.web.dir="${APP_DIR}/webapp" \
   > "${LOG_PATH}" 2>&1 &
 
 echo "Started PID $!"

@@ -13,6 +13,7 @@ public class AppProperties {
     private Jwt jwt = new Jwt();
     private Upload upload = new Upload();
     private Download download = new Download();
+    private WebApp web = new WebApp();
     private Oss oss = new Oss();
     private Ai ai = new Ai();
     private Mail mail = new Mail();
@@ -35,6 +36,13 @@ public class AppProperties {
     @Setter
     public static class Download {
         private String dir = "./downloads";
+    }
+
+    @Getter
+    @Setter
+    public static class WebApp {
+        /** Flutter Web 构建产物目录（部署到 /app/） */
+        private String dir = "./webapp";
     }
 
     @Getter

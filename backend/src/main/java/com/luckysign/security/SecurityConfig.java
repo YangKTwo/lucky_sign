@@ -44,7 +44,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         // HTTP 握手放行；STOMP CONNECT 在 WebSocketConfig 里强制 JWT
                         .requestMatchers("/ws/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/uploads/**", "/downloads/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/uploads/**", "/downloads/**", "/app", "/app/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
