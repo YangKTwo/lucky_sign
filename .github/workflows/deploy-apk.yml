@@ -48,6 +48,14 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Install CMake for JNI build
+        run: |
+          # flutter_secure_storage 等插件需要 CMake 编译 JNI/native 代码
+          # 不指定 NDK——gradle 会根据 build.gradle.kts 中 ndkVersion 自动下载
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "cmake;3.22.1"
+          echo "CMake installed for flutter_secure_storage JNI build"
+
       - name: Build release APK
         working-directory: mobile
         run: |

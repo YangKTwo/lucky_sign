@@ -74,6 +74,25 @@ flutter run -d emulator-5554
 
 ### 2. 服务器一次性准备
 
+> **⚠️ 生产部署必须设置 `run.env`**
+>
+> 后端启动脚本会读取 `/www/wwwroot/lucky-api/run.env`。
+> 如果缺少必需变量，启动会失败并报错。
+
+**必需变量（缺一不可）：**
+| 变量 | 要求 | 说明 |
+|------|------|------|
+| `MYSQL_PASSWORD` | 非空 | MySQL 密码 |
+| `JWT_SECRET` | **≥32 字符** | 用于签发 JWT token；必须是安全随机字符串 |
+
+**生成安全 JWT_SECRET 示例：**
+```bash
+# Linux/macOS
+openssl rand -base64 48
+# 或
+head -c 48 /dev/urandom | base64
+```
+
 ```bash
 # 将本机生成的部署公钥写入部署用户的 authorized_keys
 mkdir -p ~/.ssh
