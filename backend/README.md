@@ -3,17 +3,23 @@
 ## 环境
 - JDK 17
 - Maven 3.9+
-- MySQL 8（库名 `lucky_sign`，账号 root，密码见 `application.yml`）
+- MySQL 8（库名 `lucky_sign`）
 
 ## 启动
 ```bash
 cd backend
+export MYSQL_USER=root
+export MYSQL_PASSWORD='你的密码'
+export JWT_SECRET='至少32位随机串'
+export ADMIN_PASSWORD='首次启动管理员密码'
 mvn spring-boot:run
 ```
 
+口令一律用环境变量或本地 `application-local.yml`（已 gitignore），不要写进仓库。
+
 ## 默认管理员
 - 邮箱：`admin@luckysign.local`
-- 密码：`admin123`
+- 密码：由 `ADMIN_PASSWORD` 决定（仅首次 seed 时生效）
 
 ## 主要接口
 - `POST /api/auth/register` `{nickname,email,password}`

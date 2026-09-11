@@ -52,15 +52,27 @@ nohup java -jar "${JAR_PATH}" \
 echo "Started PID $!"
 echo "Waiting for readiness..."
 
+# 就绪探测：优先用登录接口（若配置了 ADMIN_PASSWORD），否则用任意受保护接口的 401/403 也算进程已起来
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 ok=0
 for _ in $(seq 1 30); do
-  code="$(curl -s -o /dev/null -w "%{http_code}" -m 3 \
-    -X POST "http://127.0.0.1:8080/api/auth/login" \
-    -H "Content-Type: application/json" \
-    -d '{"email":"admin@luckysign.local","password":"admin123"}' || true)"
-  if [[ "${code}" == "200" ]]; then
-    ok=1
-    break
+  if [[ -n "${ADMIN_PASSWORD}" ]]; then
+    code="$(curl -s -o /dev/null -w "%{http_code}" -m 3 \
+      -X POST "http://127.0.0.1:8080/api/auth/login" \
+      -H "Content-Type: application/json" \
+      -d "{\"email\":\"admin@luckysign.local\",\"password\":\"${ADMIN_PASSWORD}\"}" || true)"
+    if [[ "${code}" == "200" ]]; then
+      ok=1
+      break
+    fi
+  else
+    code="$(curl -s -o /dev/null -w "%{http_code}" -m 3 \
+      "http://127.0.0.1:8080/api/user/profile" || true)"
+    # 未登录应返回 401/403，说明服务已响应
+    if [[ "${code}" == "401" || "${code}" == "403" || "${code}" == "200" ]]; then
+      ok=1
+      break
+    fi
   fi
   if ! pgrep -f "${PID_MATCH}" >/dev/null 2>&1; then
     echo "ERROR: process exited early. Last log lines:" >&2
