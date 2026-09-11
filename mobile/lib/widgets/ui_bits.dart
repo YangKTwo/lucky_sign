@@ -159,6 +159,86 @@ class NetworkImageBox extends StatelessWidget {
   }
 }
 
+class ErrorRetry extends StatelessWidget {
+  const ErrorRetry({super.key, required this.message, required this.onRetry, this.hint});
+  final String message;
+  final VoidCallback onRetry;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 16),
+      child: Column(
+        children: [
+          Text(message, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFC0392B), height: 1.4)),
+          if (hint != null) ...[
+            const SizedBox(height: 8),
+            Text(hint!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFF8A8078), height: 1.4)),
+          ],
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('重试'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SettingsTile extends StatelessWidget {
+  const SettingsTile({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE7DDD2)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: AppColors.moss, size: 24),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                    const SizedBox(height: 3),
+                    Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF8A8078), height: 1.3)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Color(0xFFB0A69C)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class LocalImagePreview extends StatelessWidget {
   const LocalImagePreview({super.key, required this.bytes, this.height = 140});
   final Uint8List bytes;

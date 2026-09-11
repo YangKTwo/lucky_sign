@@ -5,6 +5,7 @@ import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/api_client.dart';
 import 'services/chat_inbox.dart';
+import 'services/reminder_service.dart';
 import 'theme.dart';
 
 final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -13,6 +14,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ApiClient.instance.loadToken();
   await ChatInbox.instance.load();
+  await ReminderService.instance.init();
+  if (ApiClient.instance.isLoggedIn) {
+    await ReminderService.instance.scheduleDaily();
+  }
   runApp(const LuckySignApp());
 }
 
@@ -58,7 +63,11 @@ Future<void> logoutAndGoLogin(BuildContext context, {bool askConfirm = true}) as
   await ApiClient.instance.saveToken(null);
   await ChatInbox.instance.reset();
   final prefs = await SharedPreferences.getInstance();
+  final lastEmail = prefs.getString('lastEmail');
   await prefs.clear();
+  if (lastEmail != null && lastEmail.isNotEmpty) {
+    await prefs.setString('lastEmail', lastEmail);
+  }
   if (!context.mounted) return;
   Navigator.of(context).pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => const LoginScreen()),

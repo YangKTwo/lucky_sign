@@ -148,6 +148,31 @@ public class CheckinService {
         return new CheckinDtos.HistoryResponse(items);
     }
 
+    public CheckinDtos.CalendarResponse calendar(Long userId, int days) {
+        int span = Math.min(Math.max(days, 7), 180);
+        LocalDate today = drawService.today();
+        LocalDate from = today.minusDays(span - 1L);
+        List<DailyDraw> draws = dailyDrawRepository.findByUserIdAndDrawDateGreaterThanEqualOrderByDrawDateDesc(userId, from);
+        java.util.Map<LocalDate, DailyDraw> byDate = draws.stream()
+                .collect(java.util.stream.Collectors.toMap(DailyDraw::getDrawDate, d -> d, (a, b) -> a));
+        List<CheckinDtos.CalendarDay> items = new java.util.ArrayList<>(span);
+        for (LocalDate d = from; !d.isAfter(today); d = d.plusDays(1)) {
+            DailyDraw draw = byDate.get(d);
+            String status;
+            if (draw == null) {
+                status = "NONE";
+            } else if (draw.getStatus() == DrawStatus.COMPLETED) {
+                status = "COMPLETED";
+            } else if (d.equals(today)) {
+                status = "PENDING";
+            } else {
+                status = "MISSED";
+            }
+            items.add(new CheckinDtos.CalendarDay(d, status));
+        }
+        return new CheckinDtos.CalendarResponse(items);
+    }
+
     private int calcNewStreak(User user, LocalDate date) {
         if (user.getLastCheckinDate() != null && user.getLastCheckinDate().plusDays(1).equals(date)) {
             return user.getStreakDays() + 1;
@@ -186,6 +211,10 @@ public class CheckinService {
                 user.getPoints(),
                 user.getTitle(),
                 user.getStreakDays(),
+                user.getTotalCompletedDays(),
+                titleService.nextTitle(user.getTotalCompletedDays()),
+                titleService.daysToNextTitle(user.getTotalCompletedDays()),
+                titleService.nextTitleAt(user.getTotalCompletedDays()),
                 user.getTag().name(),
                 imageUrl,
                 textContent

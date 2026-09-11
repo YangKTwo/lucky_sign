@@ -21,4 +21,9 @@ public class CircleController {
     public ApiResponse<CircleDtos.MembersResponse> members() {
         return ApiResponse.ok(circleService.mentionCandidates(AuthSupport.currentUserId()));
     }
+
+    @GetMapping("/me")
+    public ApiResponse<CircleDtos.CircleMeResponse> me() {
+        return ApiResponse.ok(circleService.me(AuthSupport.currentUserId()));
+    }
 }

@@ -89,7 +89,7 @@ public class RatingService {
 
     public Map<Long, RatingDtos.RatingSummary> summaries(Collection<Long> checkinIds, Long viewerUserId) {
         if (checkinIds == null || checkinIds.isEmpty()) {
-            return Map.of();
+            return new HashMap<>();
         }
         int expected = expectedRaterCount();
         Map<Long, List<CheckinRating>> grouped = checkinRatingRepository.findByCheckinIdIn(checkinIds).stream()

@@ -67,12 +67,15 @@ public class ChatService {
     public ChatDtos.HistoryResponse history(Long viewerUserId, Long beforeId, int size) {
         Circle circle = defaultCircle();
         int limit = Math.min(Math.max(size, 1), 50);
-        List<ChatMessage> list;
+        List<ChatMessage> fetched;
         if (beforeId == null) {
-            list = chatMessageRepository.findByCircleIdOrderByIdDesc(circle.getId(), PageRequest.of(0, limit));
+            fetched = chatMessageRepository.findByCircleIdOrderByIdDesc(circle.getId(), PageRequest.of(0, limit + 1));
         } else {
-            list = chatMessageRepository.findByCircleIdAndIdLessThanOrderByIdDesc(circle.getId(), beforeId, PageRequest.of(0, limit));
+            fetched = chatMessageRepository.findByCircleIdAndIdLessThanOrderByIdDesc(
+                    circle.getId(), beforeId, PageRequest.of(0, limit + 1));
         }
+        boolean hasMore = fetched.size() > limit;
+        List<ChatMessage> list = hasMore ? fetched.subList(0, limit) : fetched;
         List<Long> checkinIds = list.stream().map(ChatMessage::getCheckinId).filter(Objects::nonNull).toList();
         Map<Long, RatingDtos.RatingSummary> ratings = ratingService.summaries(checkinIds, viewerUserId);
         Map<Long, User> users = loadUsers(list);
@@ -80,7 +83,7 @@ public class ChatService {
                 .map(m -> toView(m, users.get(m.getUserId()), ratings.get(m.getCheckinId())))
                 .toList());
         Collections.reverse(views);
-        return new ChatDtos.HistoryResponse(views);
+        return new ChatDtos.HistoryResponse(views, hasMore);
     }
 
     @Transactional

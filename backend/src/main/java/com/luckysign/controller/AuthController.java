@@ -42,6 +42,12 @@ public class AuthController {
         return ApiResponse.ok(authService.updateProfile(AuthSupport.currentUserId(), request));
     }
 
+    @PutMapping("/user/password")
+    public ApiResponse<Void> changePassword(@Valid @RequestBody AuthDtos.ChangePasswordRequest request) {
+        authService.changePassword(AuthSupport.currentUserId(), request.oldPassword(), request.newPassword());
+        return ApiResponse.okMessage("密码已更新");
+    }
+
     @PostMapping(value = "/user/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<AuthDtos.UserProfileResponse> avatar(@RequestParam("image") MultipartFile image) {
         if (image == null || image.isEmpty()) {

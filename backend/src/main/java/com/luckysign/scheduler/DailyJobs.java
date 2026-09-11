@@ -42,4 +42,10 @@ public class DailyJobs {
         log.info("Sending morning mails...");
         mailNotifyService.sendDailyReminders();
     }
+
+    @Scheduled(cron = "0 0 20 * * *", zone = "Asia/Shanghai")
+    public void eveningIncompleteMail() {
+        log.info("Sending evening incomplete reminders...");
+        mailNotifyService.sendIncompleteReminders(drawService.today());
+    }
 }

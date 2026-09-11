@@ -25,7 +25,7 @@ public class ChatDtos {
     ) {
     }
 
-    public record HistoryResponse(List<MessageView> messages) {
+    public record HistoryResponse(List<MessageView> messages, boolean hasMore) {
     }
 
     public record SendTextRequest(String content) {

@@ -61,7 +61,9 @@ class _RankScreenState extends State<RankScreen> {
         ),
         body: Column(
           children: [
-            if (_error != null)
+            if (_error != null && _data == null)
+              ErrorRetry(message: _error!, onRetry: _load)
+            else if (_error != null)
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
@@ -127,6 +129,9 @@ class _RankScreenState extends State<RankScreen> {
         itemCount: items.length,
         itemBuilder: (_, i) {
           final m = items[i];
+          final uid = m['userId'];
+          final me = ApiClient.instance.userId;
+          final mine = me != null && uid is num && uid.toInt() == me;
           final medal = i == 0 ? '🥇' : i == 1 ? '🥈' : i == 2 ? '🥉' : '${i + 1}';
           final peer = m['peerAvgScore'];
           String right;
@@ -145,9 +150,9 @@ class _RankScreenState extends State<RankScreen> {
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: mine ? const Color(0xFFFFF4E8) : Colors.white,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFE7DDD2)),
+              border: Border.all(color: mine ? AppColors.accent.withValues(alpha: 0.45) : const Color(0xFFE7DDD2), width: mine ? 1.4 : 1),
             ),
             child: Row(
               children: [
@@ -167,6 +172,17 @@ class _RankScreenState extends State<RankScreen> {
                           Flexible(
                             child: Text(m['nickname']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.w800)),
                           ),
+                          if (mine) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.accent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text('我', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
+                            ),
+                          ],
                           const SizedBox(width: 6),
                           TagChip(m['tag']?.toString()),
                         ],

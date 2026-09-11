@@ -13,4 +13,13 @@ public class CircleDtos {
 
     public record MembersResponse(List<MemberBrief> members) {
     }
+
+    public record CircleMeResponse(
+            Long id,
+            String name,
+            String inviteCode,
+            Integer memberCount,
+            Integer maxMembers
+    ) {
+    }
 }

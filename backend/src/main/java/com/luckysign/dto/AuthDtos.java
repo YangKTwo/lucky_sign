@@ -8,7 +8,8 @@ public class AuthDtos {
     public record RegisterRequest(
             @NotBlank @Size(max = 32) String nickname,
             @NotBlank @Email String email,
-            @NotBlank @Size(min = 6, max = 64) String password
+            @NotBlank @Size(min = 6, max = 64) String password,
+            @NotBlank @Size(min = 4, max = 16) String inviteCode
     ) {
     }
 
@@ -36,8 +37,13 @@ public class AuthDtos {
     }
 
     public record UpdateProfileRequest(
-            @Size(max = 32) String nickname,
-            @Size(min = 6, max = 64) String password
+            @Size(max = 32) String nickname
+    ) {
+    }
+
+    public record ChangePasswordRequest(
+            @NotBlank String oldPassword,
+            @NotBlank @Size(min = 6, max = 64) String newPassword
     ) {
     }
 }

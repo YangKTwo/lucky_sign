@@ -46,6 +46,21 @@ class ApiClient {
   int? get userId => _userId;
   bool get isLoggedIn => _token != null && _token!.isNotEmpty;
 
+  Future<void> saveLastEmail(String? email) async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = email?.trim() ?? '';
+    if (v.isEmpty) {
+      await prefs.remove('lastEmail');
+    } else {
+      await prefs.setString('lastEmail', v);
+    }
+  }
+
+  Future<String?> lastEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('lastEmail');
+  }
+
   Map<String, String> _headers({bool json = true}) {
     final h = <String, String>{};
     if (json) h['Content-Type'] = 'application/json; charset=utf-8';

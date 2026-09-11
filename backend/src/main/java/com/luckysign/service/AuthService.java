@@ -1,6 +1,7 @@
 package com.luckysign.service;
 
 import com.luckysign.common.BizException;
+import com.luckysign.common.InviteCodes;
 import com.luckysign.domain.MemberRole;
 import com.luckysign.domain.UserRole;
 import com.luckysign.domain.UserTag;
@@ -52,8 +53,16 @@ public class AuthService {
         if (userRepository.existsByEmail(email)) {
             throw new BizException("邮箱已注册");
         }
-        Circle circle = circleRepository.findFirstByOrderByIdAsc()
-                .orElseThrow(() -> new BizException("默认圈子未初始化"));
+        String inviteCode = InviteCodes.normalize(req.inviteCode());
+        if (inviteCode.isEmpty()) {
+            throw new BizException("请填写邀请码");
+        }
+        Circle circle = circleRepository.findByInviteCode(inviteCode)
+                .orElseThrow(() -> new BizException("邀请码无效"));
+        if (circle.getMemberCount() != null && circle.getMaxMembers() != null
+                && circle.getMemberCount() >= circle.getMaxMembers()) {
+            throw new BizException("圈子已满员");
+        }
 
         User user = new User();
         user.setNickname(nickname);
@@ -107,10 +116,21 @@ public class AuthService {
         if (req.nickname() != null && !req.nickname().isBlank()) {
             user.setNickname(req.nickname().trim());
         }
-        if (req.password() != null && !req.password().isBlank()) {
-            user.setPasswordHash(passwordEncoder.encode(req.password()));
-        }
         return toProfile(userRepository.save(user));
+    }
+
+    @Transactional
+    public void changePassword(Long userId, String oldPassword, String newPassword) {
+        User user = userRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
+        if (oldPassword == null || oldPassword.isBlank()
+                || !passwordEncoder.matches(oldPassword, user.getPasswordHash())) {
+            throw new BizException("当前密码不正确");
+        }
+        if (newPassword == null || newPassword.length() < 6) {
+            throw new BizException("新密码至少 6 位");
+        }
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
     }
 
     @Transactional

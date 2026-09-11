@@ -3,6 +3,7 @@ package com.luckysign.config;
 import com.luckysign.domain.*;
 import com.luckysign.entity.*;
 import com.luckysign.repository.*;
+import com.luckysign.service.CircleService;
 import com.luckysign.service.TitleService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +23,7 @@ public class DataSeeder implements CommandLineRunner {
     private final FortuneCopyRepository fortuneCopyRepository;
     private final PasswordEncoder passwordEncoder;
     private final TitleService titleService;
+    private final CircleService circleService;
 
     public DataSeeder(UserRepository userRepository,
                       CircleRepository circleRepository,
@@ -29,7 +31,8 @@ public class DataSeeder implements CommandLineRunner {
                       TaskItemRepository taskItemRepository,
                       FortuneCopyRepository fortuneCopyRepository,
                       PasswordEncoder passwordEncoder,
-                      TitleService titleService) {
+                      TitleService titleService,
+                      CircleService circleService) {
         this.userRepository = userRepository;
         this.circleRepository = circleRepository;
         this.circleMemberRepository = circleMemberRepository;
@@ -37,6 +40,7 @@ public class DataSeeder implements CommandLineRunner {
         this.fortuneCopyRepository = fortuneCopyRepository;
         this.passwordEncoder = passwordEncoder;
         this.titleService = titleService;
+        this.circleService = circleService;
     }
 
     @Override
@@ -57,6 +61,11 @@ public class DataSeeder implements CommandLineRunner {
             c.setStatus("ACTIVE");
             return circleRepository.save(c);
         });
+        if (circle.getInviteCode() == null || circle.getInviteCode().isBlank()) {
+            circle.setInviteCode(circleService.uniqueInviteCode());
+            circle = circleRepository.save(circle);
+            log.info("Seeded circle invite code: {}", circle.getInviteCode());
+        }
 
         String adminPassword = System.getenv("ADMIN_PASSWORD");
         if (adminPassword == null || adminPassword.isBlank()) {

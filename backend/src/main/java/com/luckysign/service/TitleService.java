@@ -4,22 +4,45 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class TitleService {
+    public static final int[] THRESHOLDS = {0, 4, 11, 31, 101, 365};
+    public static final String[] TITLES = {
+            "签到萌新", "每日行者", "坚持勇士", "运气主宰", "命运大师", "传奇天命人"
+    };
+
     public String resolve(int totalCompletedDays) {
-        if (totalCompletedDays >= 365) {
-            return "传奇天命人";
+        String title = TITLES[0];
+        for (int i = 0; i < THRESHOLDS.length; i++) {
+            if (totalCompletedDays >= THRESHOLDS[i]) {
+                title = TITLES[i];
+            }
         }
-        if (totalCompletedDays >= 101) {
-            return "命运大师";
+        return title;
+    }
+
+    public String nextTitle(int totalCompletedDays) {
+        for (int i = 1; i < THRESHOLDS.length; i++) {
+            if (totalCompletedDays < THRESHOLDS[i]) {
+                return TITLES[i];
+            }
         }
-        if (totalCompletedDays >= 31) {
-            return "运气主宰";
+        return null;
+    }
+
+    public int daysToNextTitle(int totalCompletedDays) {
+        for (int i = 1; i < THRESHOLDS.length; i++) {
+            if (totalCompletedDays < THRESHOLDS[i]) {
+                return THRESHOLDS[i] - totalCompletedDays;
+            }
         }
-        if (totalCompletedDays >= 11) {
-            return "坚持勇士";
+        return 0;
+    }
+
+    public Integer nextTitleAt(int totalCompletedDays) {
+        for (int i = 1; i < THRESHOLDS.length; i++) {
+            if (totalCompletedDays < THRESHOLDS[i]) {
+                return THRESHOLDS[i];
+            }
         }
-        if (totalCompletedDays >= 4) {
-            return "每日行者";
-        }
-        return "签到萌新";
+        return null;
     }
 }

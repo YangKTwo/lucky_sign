@@ -30,6 +30,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final _itemKeys = <int, GlobalKey>{};
   final _members = <Map<String, dynamic>>[];
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  String? _historyError;
+  String? _membersError;
   int? _myUserId;
   String? _myNickname;
   bool _showMentionPicker = false;
@@ -110,9 +114,11 @@ class _ChatScreenState extends State<ChatScreen> {
         _members
           ..clear()
           ..addAll(list);
+        _membersError = null;
       });
     } catch (e) {
-      debugPrint('loadMembers failed: $e');
+      if (!mounted) return;
+      setState(() => _membersError = formatError(e));
     }
   }
 
@@ -165,6 +171,9 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } else {
       _markUnreadsEnteredViewport();
+      if (_scroll.position.pixels <= 48) {
+        _loadOlder();
+      }
     }
   }
 
@@ -342,7 +351,10 @@ class _ChatScreenState extends State<ChatScreen> {
       final res = await ApiClient.instance.getJson('/api/chat/messages?size=50');
       if (!mounted) return;
       final list = (res['data']['messages'] as List).cast<Map<String, dynamic>>();
+      final hasMore = res['data']['hasMore'] == true;
       setState(() {
+        _historyError = null;
+        _hasMore = hasMore;
         _items
           ..clear()
           ..addAll(list);
@@ -372,12 +384,49 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('聊天记录加载失败：${formatError(e)}')),
-        );
+        setState(() => _historyError = formatError(e));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadOlder() async {
+    if (_loadingMore || !_hasMore || _items.isEmpty) return;
+    final oldest = _asInt(_items.first['id']);
+    if (oldest == null) return;
+    _loadingMore = true;
+    if (mounted) setState(() {});
+    try {
+      final res = await ApiClient.instance.getJson('/api/chat/messages?size=30&beforeId=$oldest');
+      if (!mounted) return;
+      final list = (res['data']['messages'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+      final hasMore = res['data']['hasMore'] == true;
+      if (list.isEmpty) {
+        setState(() {
+          _hasMore = false;
+          _loadingMore = false;
+        });
+        return;
+      }
+      final oldMax = _scroll.hasClients ? _scroll.position.maxScrollExtent : 0.0;
+      final oldPixels = _scroll.hasClients ? _scroll.position.pixels : 0.0;
+      setState(() {
+        _items.insertAll(0, list);
+        _hasMore = hasMore;
+        _loadingMore = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scroll.hasClients) return;
+        final delta = _scroll.position.maxScrollExtent - oldMax;
+        _scroll.jumpTo(oldPixels + delta);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingMore = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('更早消息加载失败：${formatError(e)}')),
+      );
     }
   }
 
@@ -717,6 +766,30 @@ class _ChatScreenState extends State<ChatScreen> {
       body: Column(
         children: [
           if (_loading) const LinearProgressIndicator(minHeight: 2),
+          if (_historyError != null)
+            Material(
+              color: const Color(0xFFFFF1E6),
+              child: ListTile(
+                dense: true,
+                title: Text('聊天记录加载失败：$_historyError', style: const TextStyle(fontSize: 13)),
+                trailing: TextButton(onPressed: () {
+                  setState(() {
+                    _loading = true;
+                    _historyError = null;
+                  });
+                  _loadHistory();
+                }, child: const Text('重试')),
+              ),
+            ),
+          if (_membersError != null)
+            Material(
+              color: const Color(0xFFFFF8F0),
+              child: ListTile(
+                dense: true,
+                title: Text('@ 成员列表加载失败：$_membersError', style: const TextStyle(fontSize: 13)),
+                trailing: TextButton(onPressed: _loadMembers, child: const Text('重试')),
+              ),
+            ),
           Expanded(
             child: Stack(
               children: [
@@ -725,17 +798,35 @@ class _ChatScreenState extends State<ChatScreen> {
                     : ListView.builder(
                         controller: _scroll,
                         padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
-                        itemCount: _items.length,
+                        itemCount: _items.length + ((_loadingMore || _hasMore) ? 1 : 0),
                         itemBuilder: (_, i) {
-                          final m = _items[i];
+                          if (i == 0 && (_loadingMore || _hasMore)) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Center(
+                                child: _loadingMore
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : TextButton(
+                                        onPressed: _loadOlder,
+                                        child: const Text('加载更早消息'),
+                                      ),
+                              ),
+                            );
+                          }
+                          final msgIndex = (_loadingMore || _hasMore) ? i - 1 : i;
+                          final m = _items[msgIndex];
                           final id = _asInt(m['id']);
                           final key = id == null ? null : _itemKeys.putIfAbsent(id, GlobalKey.new);
                           return KeyedSubtree(
                             key: key,
                             child: Column(
                               children: [
-                                if (_shouldShowDateHeader(i)) _DateSeparator(label: _formatDateLabel(_createdAt(m))),
-                                if (_shouldShowUnreadDivider(i)) const _UnreadDivider(),
+                                if (_shouldShowDateHeader(msgIndex)) _DateSeparator(label: _formatDateLabel(_createdAt(m))),
+                                if (_shouldShowUnreadDivider(msgIndex)) const _UnreadDivider(),
                                 _bubble(m),
                               ],
                             ),

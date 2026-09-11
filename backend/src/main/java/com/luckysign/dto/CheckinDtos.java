@@ -20,6 +20,10 @@ public class CheckinDtos {
             Integer points,
             String title,
             Integer streakDays,
+            Integer totalCompletedDays,
+            String nextTitle,
+            Integer daysToNextTitle,
+            Integer nextTitleAt,
             String tag,
             String imageUrl,
             String textContent
@@ -39,5 +43,11 @@ public class CheckinDtos {
     }
 
     public record HistoryResponse(List<HistoryItem> items) {
+    }
+
+    public record CalendarDay(LocalDate date, String status) {
+    }
+
+    public record CalendarResponse(List<CalendarDay> days) {
     }
 }

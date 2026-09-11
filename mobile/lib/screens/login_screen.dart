@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
+import '../services/reminder_service.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
 import 'home_shell.dart';
@@ -18,6 +19,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _password = TextEditingController();
   final _nickname = TextEditingController();
   final _confirmPassword = TextEditingController();
+  final _inviteCode = TextEditingController();
   bool _registerMode = false;
   bool _loading = false;
   bool _obscure = true;
@@ -27,11 +29,24 @@ class _LoginScreenState extends State<LoginScreen> {
   static final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
   @override
+  void initState() {
+    super.initState();
+    _restoreLastEmail();
+  }
+
+  Future<void> _restoreLastEmail() async {
+    final last = await ApiClient.instance.lastEmail();
+    if (!mounted || last == null || last.isEmpty) return;
+    _email.text = last;
+  }
+
+  @override
   void dispose() {
     _email.dispose();
     _password.dispose();
     _nickname.dispose();
     _confirmPassword.dispose();
+    _inviteCode.dispose();
     super.dispose();
   }
 
@@ -49,6 +64,7 @@ class _LoginScreenState extends State<LoginScreen> {
         'email': _email.text.trim(),
         'password': _password.text,
         if (_registerMode) 'nickname': _nickname.text.trim(),
+        if (_registerMode) 'inviteCode': _inviteCode.text.trim(),
       };
       final res = await ApiClient.instance.postJson(path, body);
       final data = res['data'] as Map<String, dynamic>?;
@@ -61,6 +77,8 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       final profile = data['profile'] as Map<String, dynamic>?;
       await ApiClient.instance.saveToken(token);
+      await ApiClient.instance.saveLastEmail(_email.text.trim());
+      await ReminderService.instance.scheduleDaily();
       final id = profile?['id'];
       if (id is int) {
         await ApiClient.instance.saveUserId(id);
@@ -114,7 +132,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  _registerMode ? '注册后自动进入小圈子' : '每天一签，完成任务攒积分',
+                  _registerMode ? '填写邀请码加入小圈子' : '每天一签，完成任务攒积分',
                   style: const TextStyle(fontSize: 15, color: Color(0xFF7A7068)),
                 ),
                 const SizedBox(height: 28),
@@ -140,6 +158,24 @@ class _LoginScreenState extends State<LoginScreen> {
                             final t = v?.trim() ?? '';
                             if (t.isEmpty) return '请填写昵称';
                             if (t.length > 32) return '昵称最多 32 字';
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _inviteCode,
+                          textCapitalization: TextCapitalization.characters,
+                          textInputAction: TextInputAction.next,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          decoration: const InputDecoration(
+                            labelText: '邀请码',
+                            hintText: '向圈子成员索取',
+                            prefixIcon: Icon(Icons.vpn_key_outlined),
+                          ),
+                          validator: (v) {
+                            final t = v?.trim() ?? '';
+                            if (t.isEmpty) return '请填写邀请码';
+                            if (t.length < 4) return '邀请码不正确';
                             return null;
                           },
                         ),

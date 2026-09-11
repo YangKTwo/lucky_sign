@@ -38,6 +38,12 @@ public class CheckinController {
         return ApiResponse.ok(checkinService.history(AuthSupport.currentUserId()));
     }
 
+    @GetMapping("/calendar")
+    public ApiResponse<CheckinDtos.CalendarResponse> calendar(
+            @RequestParam(defaultValue = "84") int days) {
+        return ApiResponse.ok(checkinService.calendar(AuthSupport.currentUserId(), days));
+    }
+
     @GetMapping("/streak")
     public ApiResponse<Integer> streak() {
         return ApiResponse.ok(checkinService.today(AuthSupport.currentUserId()).streakDays());

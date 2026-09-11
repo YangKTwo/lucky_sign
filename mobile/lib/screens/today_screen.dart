@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -19,11 +20,23 @@ class _TodayScreenState extends State<TodayScreen> {
   Map<String, dynamic>? _data;
   String? _error;
   bool _loading = true;
+  Timer? _clock;
+  DateTime _now = DateTime.now();
 
   @override
   void initState() {
     super.initState();
     _load();
+    _clock = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      setState(() => _now = DateTime.now());
+    });
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -151,13 +164,57 @@ class _TodayScreenState extends State<TodayScreen> {
       final res = await ApiClient.instance.completeCheckin(text: textCtrl.text, image: image);
       if (!mounted) return;
       setState(() => _data = res['data'] as Map<String, dynamic>);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('打卡成功，已发到社区')));
+      await _celebrateCheckin(res['data'] as Map<String, dynamic>);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(formatError(e))),
       );
     }
+  }
+
+  Future<void> _celebrateCheckin(Map<String, dynamic> data) async {
+    final streak = (data['streakDays'] is num) ? (data['streakDays'] as num).toInt() : 0;
+    final next = data['nextTitle']?.toString();
+    final daysTo = (data['daysToNextTitle'] is num) ? (data['daysToNextTitle'] as num).toInt() : 0;
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('打卡成功'),
+        content: Text(
+          streak > 1
+              ? '连续 $streak 天！凭证已发到社区。${next != null && next.isNotEmpty ? '\n再坚持 $daysTo 天可解锁「$next」。' : ''}'
+              : '今日任务完成，凭证已发到社区。',
+        ),
+        actions: [
+          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('好')),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('打卡成功，已发到社区')));
+  }
+
+  DateTime get _deadline {
+    final n = _now;
+    return DateTime(n.year, n.month, n.day).add(const Duration(days: 1));
+  }
+
+  String _countdownLabel() {
+    final left = _deadline.difference(_now);
+    if (left.isNegative) return '即将结算';
+    final h = left.inHours;
+    final m = left.inMinutes.remainder(60);
+    if (h > 0) return '距结算还剩 $h 小时 $m 分';
+    return '距结算还剩 $m 分钟';
+  }
+
+  double _titleProgress(Map<String, dynamic> d) {
+    final total = (d['totalCompletedDays'] is num) ? (d['totalCompletedDays'] as num).toInt() : 0;
+    final at = (d['nextTitleAt'] is num) ? (d['nextTitleAt'] as num).toInt() : 0;
+    if (at <= 0) return 1;
+    return (total / at).clamp(0.0, 1.0);
   }
 
   @override
@@ -181,14 +238,12 @@ class _TodayScreenState extends State<TodayScreen> {
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           children: [
             if (_loading) const LinearProgressIndicator(minHeight: 2),
-            if (_error != null && d == null) ...[
-              const SizedBox(height: 40),
-              Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFC0392B))),
-              if (dormant) ...[
-                const SizedBox(height: 12),
-                const Text('休眠账号请联系管理员解锁后才能抽签。', textAlign: TextAlign.center),
-              ],
-            ],
+            if (_error != null && d == null)
+              ErrorRetry(
+                message: _error!,
+                hint: dormant ? '休眠账号请联系管理员解锁后才能抽签。' : null,
+                onRetry: _load,
+              ),
             if (d != null) ...[
               Container(
                 padding: const EdgeInsets.all(22),
@@ -265,6 +320,68 @@ class _TodayScreenState extends State<TodayScreen> {
                 ],
               ),
               const SizedBox(height: 16),
+              if (!completed && !dormant) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _now.hour >= 18 ? const Color(0xFFFFF1E6) : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _now.hour >= 18 ? const Color(0xFFE8A87C) : const Color(0xFFE7DDD2),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _now.hour >= 18 ? Icons.warning_amber_rounded : Icons.schedule,
+                        color: _now.hour >= 18 ? AppColors.accent : AppColors.moss,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _now.hour >= 18 && ((d['streakDays'] as num?)?.toInt() ?? 0) > 0
+                              ? '连续即将断开 · ${_countdownLabel()}'
+                              : _countdownLabel(),
+                          style: const TextStyle(fontWeight: FontWeight.w700, height: 1.35),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              if (d['nextTitle'] != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE7DDD2)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '下一称号「${d['nextTitle']}」还差 ${d['daysToNextTitle']} 天',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: LinearProgressIndicator(
+                          minHeight: 8,
+                          value: _titleProgress(d),
+                          backgroundColor: const Color(0xFFF0EAE3),
+                          color: AppColors.moss,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(

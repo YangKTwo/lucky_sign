@@ -7,4 +7,8 @@ import java.util.Optional;
 
 public interface CircleRepository extends JpaRepository<Circle, Long> {
     Optional<Circle> findFirstByOrderByIdAsc();
+
+    Optional<Circle> findByInviteCode(String inviteCode);
+
+    boolean existsByInviteCode(String inviteCode);
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../main.dart';
@@ -16,7 +17,9 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _profile;
+  Map<String, dynamic>? _circle;
   List<Map<String, dynamic>> _history = [];
+  List<Map<String, dynamic>> _calendar = [];
   String? _error;
 
   @override
@@ -29,6 +32,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final profile = await ApiClient.instance.getJson('/api/user/profile');
       final history = await ApiClient.instance.getJson('/api/checkin/history');
+      Map<String, dynamic>? circle;
+      List<Map<String, dynamic>> calendar = [];
+      try {
+        final circleRes = await ApiClient.instance.getJson('/api/circle/me');
+        circle = circleRes['data'] as Map<String, dynamic>?;
+      } catch (_) {}
+      try {
+        final calRes = await ApiClient.instance.getJson('/api/checkin/calendar?days=84');
+        calendar = (calRes['data']['days'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      } catch (_) {}
       if (!mounted) return;
       final data = profile['data'] as Map<String, dynamic>;
       final id = data['id'];
@@ -39,7 +52,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
       setState(() {
         _profile = data;
+        _circle = circle;
         _history = (history['data']['items'] as List).cast<Map<String, dynamic>>();
+        _calendar = calendar;
         _error = null;
       });
     } catch (e) {
@@ -105,6 +120,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _copyInvite() async {
+    final code = _circle?['inviteCode']?.toString() ?? '';
+    if (code.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: code));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('邀请码已复制')));
+  }
+
+  Future<void> _changePassword() async {
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => const _PasswordSheet(),
+    );
+    if (ok == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密码已更新')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = _profile;
@@ -115,7 +151,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
           children: [
-            if (_error != null)
+            if (_error != null && p == null)
+              ErrorRetry(message: _error!, onRetry: _load)
+            else if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
@@ -147,6 +185,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
               const SizedBox(height: 16),
+              if (_calendar.isNotEmpty) ...[
+                const Text('近 12 周打卡', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 10),
+                _StreakHeatmap(days: _calendar),
+                const SizedBox(height: 16),
+              ],
+              const Text('圈子与账号', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 10),
+              SettingsTile(
+                icon: Icons.group_outlined,
+                title: _circle?['name']?.toString() ?? '小圈子',
+                subtitle: _circle?['inviteCode'] == null
+                    ? '邀请码加载失败，下拉刷新'
+                    : '邀请码 ${_circle!['inviteCode']} · ${_circle!['memberCount']}/${_circle!['maxMembers']} 人 · 点此复制',
+                onTap: _copyInvite,
+              ),
+              const SizedBox(height: 10),
+              SettingsTile(
+                icon: Icons.lock_reset_outlined,
+                title: '修改密码',
+                subtitle: '需要验证当前密码',
+                onTap: _changePassword,
+              ),
+              const SizedBox(height: 10),
               _FeedbackEntry(onTap: _openFeedback),
               const SizedBox(height: 28),
               const Row(
@@ -504,6 +566,228 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StreakHeatmap extends StatelessWidget {
+  const _StreakHeatmap({required this.days});
+  final List<Map<String, dynamic>> days;
+
+  Color _color(String? status) {
+    switch (status) {
+      case 'COMPLETED':
+        return AppColors.moss;
+      case 'MISSED':
+        return const Color(0xFFE2C8BC);
+      case 'PENDING':
+        return AppColors.gold;
+      default:
+        return const Color(0xFFF0EAE3);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (days.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: Text('暂无签到日历', style: TextStyle(color: Color(0xFF8A8078)))),
+      );
+    }
+    const cell = 12.0;
+    const gap = 3.0;
+    final weeks = (days.length / 7).ceil();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE7DDD2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              height: 7 * (cell + gap) - gap,
+              width: weeks * (cell + gap) - gap,
+              child: CustomPaint(
+                painter: _HeatmapPainter(days: days, colorOf: _color, cell: cell, gap: gap),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Wrap(
+            spacing: 12,
+            children: [
+              _HeatLegend(color: Color(0xFFF0EAE3), label: '无签'),
+              _HeatLegend(color: Color(0xFFE2C8BC), label: '缺勤'),
+              _HeatLegend(color: AppColors.gold, label: '今日未完成'),
+              _HeatLegend(color: AppColors.moss, label: '已打卡'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeatLegend extends StatelessWidget {
+  const _HeatLegend({required this.color, required this.label});
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 10, height: 10, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF8A8078))),
+      ],
+    );
+  }
+}
+
+class _HeatmapPainter extends CustomPainter {
+  _HeatmapPainter({required this.days, required this.colorOf, required this.cell, required this.gap});
+  final List<Map<String, dynamic>> days;
+  final Color Function(String?) colorOf;
+  final double cell;
+  final double gap;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (var i = 0; i < days.length; i++) {
+      final week = i ~/ 7;
+      final weekday = i % 7;
+      final rect = Rect.fromLTWH(week * (cell + gap), weekday * (cell + gap), cell, cell);
+      final paint = Paint()..color = colorOf(days[i]['status']?.toString());
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(2)), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _HeatmapPainter oldDelegate) => oldDelegate.days != days;
+}
+
+class _PasswordSheet extends StatefulWidget {
+  const _PasswordSheet();
+
+  @override
+  State<_PasswordSheet> createState() => _PasswordSheetState();
+}
+
+class _PasswordSheetState extends State<_PasswordSheet> {
+  final _old = TextEditingController();
+  final _next = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _submitting = false;
+  bool _obscure = true;
+  String? _error;
+
+  @override
+  void dispose() {
+    _old.dispose();
+    _next.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final oldP = _old.text;
+    final newP = _next.text;
+    if (oldP.isEmpty || newP.isEmpty) {
+      setState(() => _error = '请填写完整');
+      return;
+    }
+    if (newP.length < 6) {
+      setState(() => _error = '新密码至少 6 位');
+      return;
+    }
+    if (newP != _confirm.text) {
+      setState(() => _error = '两次新密码不一致');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.putJson('/api/user/password', {
+        'oldPassword': oldP,
+        'newPassword': newP,
+      });
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = formatError(e);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final safe = MediaQuery.paddingOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 10, 20, 16 + bottom + safe),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(color: const Color(0xFFE0D6CC), borderRadius: BorderRadius.circular(4)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('修改密码', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _old,
+            obscureText: _obscure,
+            decoration: const InputDecoration(labelText: '当前密码'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _next,
+            obscureText: _obscure,
+            decoration: const InputDecoration(labelText: '新密码'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _confirm,
+            obscureText: _obscure,
+            decoration: InputDecoration(
+              labelText: '确认新密码',
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _obscure = !_obscure),
+                icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+              ),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
+          ],
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: _submitting ? null : _submit,
+            style: FilledButton.styleFrom(backgroundColor: AppColors.accent, minimumSize: const Size.fromHeight(48)),
+            child: Text(_submitting ? '请稍候…' : '保存'),
           ),
         ],
       ),

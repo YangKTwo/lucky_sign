@@ -27,6 +27,9 @@ public class Circle {
     @Column(nullable = false)
     private Integer memberCount = 0;
 
+    @Column(length = 12, unique = true)
+    private String inviteCode;
+
     @Column(nullable = false, length = 16)
     private String status = "ACTIVE";
 

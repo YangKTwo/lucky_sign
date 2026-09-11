@@ -1,6 +1,7 @@
 package com.luckysign.service;
 
 import com.luckysign.common.BizException;
+import com.luckysign.common.InviteCodes;
 import com.luckysign.dto.CircleDtos;
 import com.luckysign.entity.Circle;
 import com.luckysign.entity.CircleMember;
@@ -54,5 +55,33 @@ public class CircleService {
             list.add(new CircleDtos.MemberBrief(u.getId(), u.getNickname(), u.getAvatarUrl(), false));
         }
         return new CircleDtos.MembersResponse(list);
+    }
+
+    public CircleDtos.CircleMeResponse me(Long userId) {
+        Circle circle = circleRepository.findFirstByOrderByIdAsc()
+                .orElseThrow(() -> new BizException("默认圈子未初始化"));
+        if (userId == null || !circleMemberRepository.existsByCircleIdAndUserId(circle.getId(), userId)) {
+            throw new BizException("你不在这个圈子里");
+        }
+        if (circle.getInviteCode() == null || circle.getInviteCode().isBlank()) {
+            circle.setInviteCode(uniqueInviteCode());
+            circle = circleRepository.save(circle);
+        }
+        return new CircleDtos.CircleMeResponse(
+                circle.getId(),
+                circle.getName(),
+                circle.getInviteCode(),
+                circle.getMemberCount(),
+                circle.getMaxMembers());
+    }
+
+    public String uniqueInviteCode() {
+        for (int i = 0; i < 30; i++) {
+            String code = InviteCodes.random();
+            if (!circleRepository.existsByInviteCode(code)) {
+                return code;
+            }
+        }
+        throw new BizException("无法生成邀请码，请稍后重试");
     }
 }
