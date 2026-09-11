@@ -6,6 +6,7 @@ import com.luckysign.security.UserPrincipal;
 import io.jsonwebtoken.Claims;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
@@ -20,7 +21,10 @@ import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBr
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Configuration
 @EnableWebSocketMessageBroker
@@ -29,10 +33,16 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
+    private final List<String> allowedOrigins;
 
-    public WebSocketConfig(JwtService jwtService, UserRepository userRepository) {
+    public WebSocketConfig(JwtService jwtService, UserRepository userRepository,
+                           @Value("${app.cors.allowed-origins:}") String corsOrigins) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
+        this.allowedOrigins = Arrays.stream(corsOrigins.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -43,8 +53,13 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*");
+        var endpoint = registry.addEndpoint("/ws");
+        if (allowedOrigins.isEmpty() || allowedOrigins.contains("*")) {
+            log.warn("WebSocket CORS: using wildcard '*' - restrict in production via app.cors.allowed-origins");
+            endpoint.setAllowedOriginPatterns("*");
+        } else {
+            endpoint.setAllowedOrigins(allowedOrigins.toArray(new String[0]));
+        }
     }
 
     @Override

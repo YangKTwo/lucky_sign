@@ -77,6 +77,10 @@ public class AiAssistantService {
     }
 
     public String ask(Long userId, String userNickname, String question) {
+        if (userId == null) {
+            throw new BizException("用户身份验证失败");
+        }
+
         if (!isReady()) {
             throw new BizException("社区助手未启用");
         }
@@ -153,7 +157,7 @@ public class AiAssistantService {
 
     private boolean checkAndConsumeQuota(Long userId) {
         if (userId == null) {
-            return true;
+            return false;
         }
         String key = userId + ":" + LocalDate.now();
         DailyCounter counter = userQuotas.compute(key, (k, v) -> {
