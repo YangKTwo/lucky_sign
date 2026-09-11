@@ -118,6 +118,7 @@ public class ChatService {
                 question = "你好，请简单介绍一下你自己，并说明你可以怎么帮助这个打卡小圈子。";
             }
             eventPublisher.publishEvent(new AssistantRequestedEvent(
+                    user.getId(),
                     user.getNickname(),
                     question,
                     pendingId));

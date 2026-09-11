@@ -25,6 +25,16 @@ if [[ -z "${MYSQL_PASSWORD}" ]]; then
   exit 1
 fi
 
+JWT_SECRET="${JWT_SECRET:-}"
+if [[ -z "${JWT_SECRET}" ]]; then
+  echo "ERROR: JWT_SECRET is required. Set a secure random string (≥32 chars) in ${ENV_FILE}" >&2
+  exit 1
+fi
+if [[ ${#JWT_SECRET} -lt 32 ]]; then
+  echo "ERROR: JWT_SECRET must be at least 32 characters (current: ${#JWT_SECRET})" >&2
+  exit 1
+fi
+
 if [[ ! -f "${JAR_PATH}" ]]; then
   echo "ERROR: JAR not found: ${JAR_PATH}" >&2
   exit 1
@@ -38,10 +48,15 @@ if pgrep -f "${PID_MATCH}" >/dev/null 2>&1; then
   sleep 2
 fi
 
+# Production: bind to 127.0.0.1 (TLS proxy forwards from public 443)
+# Set SERVER_ADDRESS=0.0.0.0 only for dev/test without a proxy
+SERVER_ADDRESS="${SERVER_ADDRESS:-127.0.0.1}"
+SERVER_PORT="${SERVER_PORT:-8080}"
+
 cd "${APP_DIR}"
 nohup java -jar "${JAR_PATH}" \
-  --server.address=0.0.0.0 \
-  --server.port=8080 \
+  --server.address="${SERVER_ADDRESS}" \
+  --server.port="${SERVER_PORT}" \
   --spring.datasource.url="${MYSQL_URL}" \
   --spring.datasource.username="${MYSQL_USER}" \
   --spring.datasource.password="${MYSQL_PASSWORD}" \
@@ -89,5 +104,5 @@ if [[ "${ok}" -ne 1 ]]; then
   exit 1
 fi
 
-echo "Backend is up on 0.0.0.0:8080"
-ss -lntp 2>/dev/null | grep 8080 || true
+echo "Backend is up on ${SERVER_ADDRESS}:${SERVER_PORT}"
+ss -lntp 2>/dev/null | grep "${SERVER_PORT}" || true

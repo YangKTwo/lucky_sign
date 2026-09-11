@@ -49,6 +49,9 @@ public class DailyDraw {
     @Column(nullable = false, length = 16)
     private DrawStatus status = DrawStatus.PENDING;
 
+    @Version
+    private Long version;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 }

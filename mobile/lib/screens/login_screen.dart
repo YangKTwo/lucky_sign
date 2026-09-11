@@ -75,8 +75,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (token == null || token.isEmpty) {
         throw Exception('未拿到登录凭证，请重试');
       }
+      final refreshToken = data['refreshToken'] as String?;
       final profile = data['profile'] as Map<String, dynamic>?;
-      await ApiClient.instance.saveToken(token);
+      await ApiClient.instance.saveToken(token, refreshToken: refreshToken);
       await ApiClient.instance.saveLastEmail(_email.text.trim());
       await ReminderService.instance.scheduleDaily();
       final id = profile?['id'];
@@ -221,7 +222,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         validator: (v) {
                           final t = v ?? '';
                           if (t.isEmpty) return '请填写密码';
-                          if (_registerMode && t.length < 6) return '密码至少 6 位';
+                          if (_registerMode && t.length < 8) return '密码至少 8 位';
                           return null;
                         },
                       ),

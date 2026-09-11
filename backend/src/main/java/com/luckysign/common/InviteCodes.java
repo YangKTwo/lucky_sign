@@ -4,7 +4,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public final class InviteCodes {
     private static final String ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    public static final int LENGTH = 6;
+    public static final int LENGTH = 10;
 
     private InviteCodes() {
     }

@@ -23,9 +23,9 @@ jobs:
           java-version: "17"
           cache: maven
 
-      - name: Build JAR
+      - name: Run tests and build JAR
         working-directory: backend
-        run: mvn -B -DskipTests package
+        run: mvn -B verify package
 
       - name: Prepare deploy artifacts
         run: |

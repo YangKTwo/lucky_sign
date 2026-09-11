@@ -1,0 +1,19 @@
+# Local development profile
+# Run with: --spring.profiles.active=local or SPRING_PROFILES_ACTIVE=local
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: update
+  flyway:
+    enabled: false
+
+app:
+  jwt:
+    # Local dev secret - DO NOT use in production
+    secret: local-dev-secret-32-chars-minimum-ok
+
+logging:
+  level:
+    com.luckysign: DEBUG
+    org.hibernate.SQL: DEBUG

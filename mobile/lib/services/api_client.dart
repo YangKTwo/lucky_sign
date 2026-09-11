@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,23 +14,62 @@ class ApiClient {
   static final ApiClient instance = ApiClient._();
 
   String? _token;
+  String? _refreshToken;
   int? _userId;
+  bool _isRefreshing = false;
+
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
 
   Future<void> loadToken() async {
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      _token = prefs.getString('token');
+      _refreshToken = prefs.getString('refreshToken');
+    } else {
+      _token = await _secureStorage.read(key: 'token');
+      _refreshToken = await _secureStorage.read(key: 'refreshToken');
+    }
     final prefs = await SharedPreferences.getInstance();
-    _token = prefs.getString('token');
     _userId = prefs.getInt('userId');
   }
 
-  Future<void> saveToken(String? token) async {
+  Future<void> saveToken(String? token, {String? refreshToken}) async {
     _token = token;
-    final prefs = await SharedPreferences.getInstance();
-    if (token == null) {
-      await prefs.remove('token');
-      await prefs.remove('userId');
-      _userId = null;
+    if (refreshToken != null) {
+      _refreshToken = refreshToken;
+    }
+
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      if (token == null) {
+        await prefs.remove('token');
+        await prefs.remove('refreshToken');
+        await prefs.remove('userId');
+        _userId = null;
+        _refreshToken = null;
+      } else {
+        await prefs.setString('token', token);
+        if (refreshToken != null) {
+          await prefs.setString('refreshToken', refreshToken);
+        }
+      }
     } else {
-      await prefs.setString('token', token);
+      if (token == null) {
+        await _secureStorage.delete(key: 'token');
+        await _secureStorage.delete(key: 'refreshToken');
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('userId');
+        _userId = null;
+        _refreshToken = null;
+      } else {
+        await _secureStorage.write(key: 'token', value: token);
+        if (refreshToken != null) {
+          await _secureStorage.write(key: 'refreshToken', value: refreshToken);
+        }
+      }
     }
   }
 
@@ -43,6 +84,7 @@ class ApiClient {
   }
 
   String? get token => _token;
+  String? get refreshToken => _refreshToken;
   int? get userId => _userId;
   bool get isLoggedIn => _token != null && _token!.isNotEmpty;
 
@@ -68,30 +110,77 @@ class ApiClient {
     return h;
   }
 
-  Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body) async {
+  Future<bool> _tryRefreshToken() async {
+    if (_isRefreshing || _refreshToken == null || _refreshToken!.isEmpty) {
+      return false;
+    }
+    _isRefreshing = true;
+    try {
+      final res = await http.post(
+        Uri.parse('$apiBaseUrl/api/auth/refresh'),
+        headers: {'Content-Type': 'application/json; charset=utf-8'},
+        body: jsonEncode({'refreshToken': _refreshToken}),
+      );
+      if (res.statusCode == 200) {
+        final map = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        if (map['success'] == true) {
+          final data = map['data'] as Map<String, dynamic>?;
+          final newToken = data?['token'] as String?;
+          final newRefresh = data?['refreshToken'] as String?;
+          if (newToken != null && newToken.isNotEmpty) {
+            await saveToken(newToken, refreshToken: newRefresh);
+            return true;
+          }
+        }
+      }
+      await saveToken(null);
+      return false;
+    } catch (e) {
+      return false;
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body, {bool retry = true}) async {
     final res = await http.post(
       Uri.parse('$apiBaseUrl$path'),
       headers: _headers(),
       body: jsonEncode(body),
     );
+    if (res.statusCode == 401 && retry && !path.contains('/auth/')) {
+      if (await _tryRefreshToken()) {
+        return postJson(path, body, retry: false);
+      }
+    }
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> getJson(String path) async {
+  Future<Map<String, dynamic>> getJson(String path, {bool retry = true}) async {
     final res = await http.get(Uri.parse('$apiBaseUrl$path'), headers: _headers());
+    if (res.statusCode == 401 && retry && !path.contains('/auth/')) {
+      if (await _tryRefreshToken()) {
+        return getJson(path, retry: false);
+      }
+    }
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> putJson(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> putJson(String path, Map<String, dynamic> body, {bool retry = true}) async {
     final res = await http.put(
       Uri.parse('$apiBaseUrl$path'),
       headers: _headers(),
       body: jsonEncode(body),
     );
+    if (res.statusCode == 401 && retry && !path.contains('/auth/')) {
+      if (await _tryRefreshToken()) {
+        return putJson(path, body, retry: false);
+      }
+    }
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> completeCheckin({String? text, XFile? image}) async {
+  Future<Map<String, dynamic>> completeCheckin({String? text, XFile? image, bool retry = true}) async {
     final req = http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/api/checkin/complete'));
     if (_token != null) req.headers['Authorization'] = 'Bearer $_token';
     if (text != null && text.isNotEmpty) {
@@ -109,10 +198,15 @@ class ApiClient {
     }
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 401 && retry) {
+      if (await _tryRefreshToken()) {
+        return completeCheckin(text: text, image: image, retry: false);
+      }
+    }
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> uploadAvatar(XFile image) async {
+  Future<Map<String, dynamic>> uploadAvatar(XFile image, {bool retry = true}) async {
     final req = http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/api/user/avatar'));
     if (_token != null) req.headers['Authorization'] = 'Bearer $_token';
     final bytes = await image.readAsBytes();
@@ -125,6 +219,11 @@ class ApiClient {
     ));
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 401 && retry) {
+      if (await _tryRefreshToken()) {
+        return uploadAvatar(image, retry: false);
+      }
+    }
     return _decode(res);
   }
 

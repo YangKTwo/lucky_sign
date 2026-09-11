@@ -13,6 +13,7 @@ import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.CircleRepository;
 import com.luckysign.repository.UserRepository;
 import com.luckysign.security.JwtService;
+import io.jsonwebtoken.Claims;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,8 +48,8 @@ public class AuthService {
         if (nickname.isEmpty()) {
             throw new BizException("请填写昵称");
         }
-        if (req.password() == null || req.password().length() < 6) {
-            throw new BizException("密码至少 6 位");
+        if (req.password() == null || req.password().length() < 8) {
+            throw new BizException("密码至少 8 位");
         }
         if (userRepository.existsByEmail(email)) {
             throw new BizException("邮箱已注册");
@@ -71,20 +72,38 @@ public class AuthService {
         user.setTitle(titleService.resolve(0));
         user.setRole(UserRole.USER);
         user.setTag(UserTag.NONE);
+        user.setTokenVersion(0L);
+        user.setEnabled(true);
         user = userRepository.save(user);
 
-        if (!circleMemberRepository.existsByCircleIdAndUserId(circle.getId(), user.getId())) {
-            CircleMember member = new CircleMember();
-            member.setCircleId(circle.getId());
-            member.setUserId(user.getId());
-            member.setRole(MemberRole.MEMBER);
-            circleMemberRepository.save(member);
-            circle.setMemberCount(circle.getMemberCount() + 1);
-            circleRepository.save(circle);
+        boolean membershipCreated = false;
+        try {
+            if (!circleMemberRepository.existsByCircleIdAndUserId(circle.getId(), user.getId())) {
+                int updated = circleRepository.incrementMemberCount(circle.getId());
+                if (updated == 0) {
+                    throw new BizException("圈子已满员");
+                }
+                CircleMember member = new CircleMember();
+                member.setCircleId(circle.getId());
+                member.setUserId(user.getId());
+                member.setRole(MemberRole.MEMBER);
+                circleMemberRepository.save(member);
+                membershipCreated = true;
+            } else {
+                membershipCreated = true;
+            }
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            circleRepository.decrementMemberCount(circle.getId());
+            if (circleMemberRepository.existsByCircleIdAndUserId(circle.getId(), user.getId())) {
+                membershipCreated = true;
+            }
         }
 
-        String token = jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name());
-        return new AuthDtos.AuthResponse(token, toProfile(user));
+        if (!membershipCreated) {
+            throw new BizException("加入圈子失败，请稍后重试");
+        }
+
+        return generateAuthResponse(user);
     }
 
     public AuthDtos.AuthResponse login(AuthDtos.LoginRequest req) {
@@ -94,11 +113,49 @@ public class AuthService {
         }
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new BizException("邮箱或密码错误"));
+        if (!Boolean.TRUE.equals(user.getEnabled())) {
+            throw new BizException("账号已禁用");
+        }
         if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
             throw new BizException("邮箱或密码错误");
         }
-        String token = jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name());
-        return new AuthDtos.AuthResponse(token, toProfile(user));
+        return generateAuthResponse(user);
+    }
+
+    @Transactional
+    public AuthDtos.AuthResponse refresh(String refreshToken) {
+        Claims claims;
+        try {
+            claims = jwtService.parse(refreshToken);
+        } catch (Exception e) {
+            throw new BizException("刷新令牌无效");
+        }
+
+        String tokenType = jwtService.getTokenType(claims);
+        if (!"refresh".equals(tokenType)) {
+            throw new BizException("刷新令牌无效");
+        }
+
+        Long userId = Long.valueOf(claims.getSubject());
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BizException("用户不存在"));
+
+        if (!Boolean.TRUE.equals(user.getEnabled())) {
+            throw new BizException("账号已禁用");
+        }
+
+        Long tokenVer = jwtService.getTokenVersion(claims);
+        if (tokenVer != null && !tokenVer.equals(user.getTokenVersion())) {
+            throw new BizException("令牌已失效，请重新登录");
+        }
+
+        return generateAuthResponse(user);
+    }
+
+    private AuthDtos.AuthResponse generateAuthResponse(User user) {
+        String accessToken = jwtService.generateAccessToken(user.getId(), user.getEmail(), user.getTokenVersion());
+        String refreshToken = jwtService.generateRefreshToken(user.getId(), user.getTokenVersion());
+        return new AuthDtos.AuthResponse(accessToken, refreshToken, toProfile(user));
     }
 
     private static String normalizeEmail(String email) {
@@ -120,17 +177,24 @@ public class AuthService {
     }
 
     @Transactional
-    public void changePassword(Long userId, String oldPassword, String newPassword) {
+    public AuthDtos.AuthResponse changePassword(Long userId, String oldPassword, String newPassword) {
         User user = userRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
         if (oldPassword == null || oldPassword.isBlank()
                 || !passwordEncoder.matches(oldPassword, user.getPasswordHash())) {
             throw new BizException("当前密码不正确");
         }
-        if (newPassword == null || newPassword.length() < 6) {
-            throw new BizException("新密码至少 6 位");
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new BizException("新密码至少 8 位");
         }
         user.setPasswordHash(passwordEncoder.encode(newPassword));
-        userRepository.save(user);
+        user.setTokenVersion(user.getTokenVersion() + 1);
+        user = userRepository.save(user);
+        return generateAuthResponse(user);
+    }
+
+    @Transactional
+    public void invalidateTokens(Long userId) {
+        userRepository.incrementTokenVersion(userId);
     }
 
     @Transactional

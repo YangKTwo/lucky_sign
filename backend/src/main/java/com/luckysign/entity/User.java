@@ -56,6 +56,12 @@ public class User {
     private UserRole role = UserRole.USER;
 
     @Column(nullable = false)
+    private Long tokenVersion = 0L;
+
+    @Column(nullable = false)
+    private Boolean enabled = true;
+
+    @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
     @Column(nullable = false)
