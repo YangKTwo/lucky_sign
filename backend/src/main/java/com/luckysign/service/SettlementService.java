@@ -4,10 +4,8 @@ import com.luckysign.domain.DrawStatus;
 import com.luckysign.domain.PointChangeType;
 import com.luckysign.domain.UserTag;
 import com.luckysign.entity.DailyDraw;
-import com.luckysign.entity.PointsLog;
 import com.luckysign.entity.User;
 import com.luckysign.repository.DailyDrawRepository;
-import com.luckysign.repository.PointsLogRepository;
 import com.luckysign.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,7 +21,7 @@ public class SettlementService {
 
     private final DailyDrawRepository dailyDrawRepository;
     private final UserRepository userRepository;
-    private final PointsLogRepository pointsLogRepository;
+    private final PointsService pointsService;
     private final DrawService drawService;
     private final TitleService titleService;
     private final MailNotifyService mailNotifyService;
@@ -31,14 +29,14 @@ public class SettlementService {
 
     public SettlementService(DailyDrawRepository dailyDrawRepository,
                              UserRepository userRepository,
-                             PointsLogRepository pointsLogRepository,
+                             PointsService pointsService,
                              DrawService drawService,
                              TitleService titleService,
                              MailNotifyService mailNotifyService,
                              ChatService chatService) {
         this.dailyDrawRepository = dailyDrawRepository;
         this.userRepository = userRepository;
-        this.pointsLogRepository = pointsLogRepository;
+        this.pointsService = pointsService;
         this.drawService = drawService;
         this.titleService = titleService;
         this.mailNotifyService = mailNotifyService;
@@ -62,16 +60,7 @@ public class SettlementService {
 
             int penalty = drawService.rewardPoints(draw) / 2;
             if (penalty > 0) {
-                int next = Math.max(0, user.getPoints() - penalty);
-                int delta = next - user.getPoints();
-                user.setPoints(next);
-                PointsLog pl = new PointsLog();
-                pl.setUserId(user.getId());
-                pl.setChangeType(PointChangeType.PENALTY);
-                pl.setDelta(delta);
-                pl.setBalanceAfter(next);
-                pl.setRelatedId(draw.getId());
-                pointsLogRepository.save(pl);
+                pointsService.apply(user, -penalty, PointChangeType.PENALTY, draw.getId());
             }
 
             user.setStreakDays(0);
@@ -83,16 +72,8 @@ public class SettlementService {
                         "你已连续7天未完成任务，账号进入休眠并禁言，请联系管理员解锁。");
                 chatService.postSystem(user.getNickname() + " 因连续7天未完成进入休眠");
             } else if (user.getMissStreakDays() >= 3) {
-                int before = user.getPoints();
-                user.setPoints(0);
+                pointsService.resetToZero(user, PointChangeType.RESET_ZERO, draw.getId());
                 user.setTag(UserTag.DROPPED);
-                PointsLog reset = new PointsLog();
-                reset.setUserId(user.getId());
-                reset.setChangeType(PointChangeType.RESET_ZERO);
-                reset.setDelta(-before);
-                reset.setBalanceAfter(0);
-                reset.setRelatedId(draw.getId());
-                pointsLogRepository.save(reset);
                 mailNotifyService.sendWarning(user.getEmail(), "掉签警告",
                         "你已连续3天未完成任务，积分已清零并标记为掉签。");
             }

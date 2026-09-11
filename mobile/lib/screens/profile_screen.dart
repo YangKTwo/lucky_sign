@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import '../main.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
+import '../utils/errors.dart';
 import '../widgets/ui_bits.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -43,7 +44,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = formatError(e));
     }
   }
 
@@ -58,7 +59,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(formatError(e))),
       );
     }
   }
@@ -85,7 +86,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() => _profile = res['data'] as Map<String, dynamic>);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(formatError(e))));
     }
   }
 
@@ -428,7 +429,7 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
       if (!mounted) return;
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(formatError(e))),
       );
     }
   }

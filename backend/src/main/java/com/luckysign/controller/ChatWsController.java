@@ -21,9 +21,10 @@ public class ChatWsController {
     @MessageMapping("/chat.send")
     public void send(@Payload ChatDtos.SendTextRequest request, Principal principal) {
         Long userId = resolveUserId(principal);
-        if (userId != null) {
-            chatService.sendText(userId, request.content());
+        if (userId == null) {
+            throw new IllegalStateException("Unauthorized");
         }
+        chatService.sendText(userId, request.content());
     }
 
     private Long resolveUserId(Principal principal) {

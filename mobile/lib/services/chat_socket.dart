@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:stomp_dart_client/stomp_dart_client.dart';
 
 import '../config.dart';
@@ -15,6 +16,10 @@ class ChatSocket {
   void connect() {
     disconnect();
     final token = ApiClient.instance.token;
+    if (token == null || token.isEmpty) {
+      debugPrint('ChatSocket: skip connect, no token');
+      return;
+    }
     _client = StompClient(
       config: StompConfig(
         url: wsBaseUrl,
@@ -29,12 +34,13 @@ class ChatSocket {
           );
         },
         stompConnectHeaders: {
-          if (token != null) 'Authorization': 'Bearer $token',
+          'Authorization': 'Bearer $token',
         },
         webSocketConnectHeaders: {
-          if (token != null) 'Authorization': 'Bearer $token',
+          'Authorization': 'Bearer $token',
         },
-        onWebSocketError: (e) {},
+        onWebSocketError: (e) => debugPrint('ChatSocket ws error: $e'),
+        onStompError: (frame) => debugPrint('ChatSocket stomp error: ${frame.body}'),
         reconnectDelay: const Duration(seconds: 5),
       ),
     );

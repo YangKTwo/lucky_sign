@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../constants/assistant.dart';
 import '../main.dart';
 import '../services/api_client.dart';
 import '../services/chat_inbox.dart';
 import '../services/chat_socket.dart';
 import '../theme.dart';
+import '../utils/errors.dart';
 import '../widgets/ui_bits.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -32,7 +34,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String _mentionQuery = '';
   int _atStart = -1;
 
-  static const _assistantNames = ['石桥头第一AI', '助手'];
+  static const _assistantNames = assistantMentionNames;
 
   @override
   void initState() {
@@ -75,7 +77,10 @@ class _ChatScreenState extends State<ChatScreen> {
         if (parsed != null) _myUserId = parsed;
         if (nick != null && nick.isNotEmpty) _myNickname = nick;
       });
-    } catch (_) {}
+    } catch (e) {
+      // 个人资料拉取失败时仍可继续聊天，下次再补
+      debugPrint('ensureMyUserId failed: $e');
+    }
   }
 
   Future<void> _loadMembers() async {
@@ -88,7 +93,9 @@ class _ChatScreenState extends State<ChatScreen> {
           ..clear()
           ..addAll(list);
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('loadMembers failed: $e');
+    }
   }
 
   void _upsertMessage(Map<String, dynamic> msg) {
@@ -268,7 +275,12 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       _jumpBottom();
-    } catch (_) {
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('聊天记录加载失败：${formatError(e)}')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -355,7 +367,7 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(formatError(e))),
       );
     }
   }
@@ -390,7 +402,7 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(formatError(e))),
       );
     }
   }
@@ -795,7 +807,7 @@ class _CheckinDetailSheetState extends State<_CheckinDetailSheet> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(formatError(e))),
       );
     } finally {
       if (mounted) setState(() => _submitting = false);

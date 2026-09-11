@@ -123,30 +123,15 @@ public class FileStorageService {
 
     private String resolveContentType(MultipartFile file) {
         String ct = file.getContentType();
-        if (ct != null) {
-            ct = ct.toLowerCase().split(";")[0].trim();
-            if ("image/jpg".equals(ct)) {
-                ct = "image/jpeg";
-            }
-            if (ALLOWED.contains(ct)) {
-                return ct;
-            }
-        }
-        String name = file.getOriginalFilename();
-        if (name == null) {
+        if (ct == null || ct.isBlank()) {
+            // 无 MIME 时不根据扩展名猜测，避免伪造后缀绕过
             return null;
         }
-        String lower = name.toLowerCase();
-        if (lower.endsWith(".png")) {
-            return "image/png";
+        ct = ct.toLowerCase(Locale.ROOT).split(";")[0].trim();
+        if ("image/jpg".equals(ct)) {
+            ct = "image/jpeg";
         }
-        if (lower.endsWith(".webp")) {
-            return "image/webp";
-        }
-        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
-            return "image/jpeg";
-        }
-        return null;
+        return ALLOWED.contains(ct) ? ct : null;
     }
 
     private static String normalizeEndpoint(String endpoint) {

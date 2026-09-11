@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../services/api_client.dart';
 import '../theme.dart';
+import '../utils/errors.dart';
 import '../widgets/ui_bits.dart';
 
 class TodayScreen extends StatefulWidget {
@@ -37,7 +38,7 @@ class _TodayScreenState extends State<TodayScreen> {
       setState(() => _data = res['data'] as Map<String, dynamic>);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = formatError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -154,7 +155,7 @@ class _TodayScreenState extends State<TodayScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(formatError(e))),
       );
     }
   }

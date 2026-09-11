@@ -5,8 +5,12 @@
 ## 结构
 
 - `backend/` — Spring Boot 3 + MySQL + WebSocket
-- `mobile/` — Flutter（Android / iOS / Web）
+- `mobile/` — **Flutter（Dart）** 客户端：Material + `http` + STOMP，无 Provider/Riverpod/Bloc
 - `deploy/` — 服务器启动脚本（配合 GitHub Actions）
+
+## 前端技术栈（简述）
+
+Flutter 3.x / Dart ≥3.3 · StatefulWidget · http + stomp_dart_client · shared_preferences · image_picker · 目标 Android / iOS / Web。详见 [`mobile/README.md`](mobile/README.md)。
 
 ## 快速启动
 
@@ -67,6 +71,8 @@ mkdir -p /www/wwwroot/lucky-api/uploads
 cat >/www/wwwroot/lucky-api/run.env <<'EOF'
 MYSQL_USER=root
 MYSQL_PASSWORD=123456
+JWT_SECRET=请换成至少32位随机字符串
+ADMIN_PASSWORD=请改掉默认管理员密码
 
 # ---- 阿里云 OSS（图片/头像）----
 OSS_ENABLED=true
@@ -85,6 +91,7 @@ AI_MODEL=qwen-plus
 # 可选：
 # AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 # AI_MENTION=@助手
+# CORS_ORIGINS=https://your-web-origin.example
 EOF
 chmod 600 /www/wwwroot/lucky-api/run.env
 ```

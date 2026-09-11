@@ -38,7 +38,7 @@ public class AuthController {
     }
 
     @PutMapping("/user/profile")
-    public ApiResponse<AuthDtos.UserProfileResponse> update(@RequestBody AuthDtos.UpdateProfileRequest request) {
+    public ApiResponse<AuthDtos.UserProfileResponse> update(@Valid @RequestBody AuthDtos.UpdateProfileRequest request) {
         return ApiResponse.ok(authService.updateProfile(AuthSupport.currentUserId(), request));
     }
 

@@ -41,15 +41,23 @@ public class AuthService {
 
     @Transactional
     public AuthDtos.AuthResponse register(AuthDtos.RegisterRequest req) {
-        if (userRepository.existsByEmail(req.email().trim().toLowerCase())) {
+        String email = normalizeEmail(req.email());
+        String nickname = req.nickname() == null ? "" : req.nickname().trim();
+        if (nickname.isEmpty()) {
+            throw new BizException("请填写昵称");
+        }
+        if (req.password() == null || req.password().length() < 6) {
+            throw new BizException("密码至少 6 位");
+        }
+        if (userRepository.existsByEmail(email)) {
             throw new BizException("邮箱已注册");
         }
         Circle circle = circleRepository.findFirstByOrderByIdAsc()
                 .orElseThrow(() -> new BizException("默认圈子未初始化"));
 
         User user = new User();
-        user.setNickname(req.nickname().trim());
-        user.setEmail(req.email().trim().toLowerCase());
+        user.setNickname(nickname);
+        user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(req.password()));
         user.setTitle(titleService.resolve(0));
         user.setRole(UserRole.USER);
@@ -71,13 +79,21 @@ public class AuthService {
     }
 
     public AuthDtos.AuthResponse login(AuthDtos.LoginRequest req) {
-        User user = userRepository.findByEmail(req.email().trim().toLowerCase())
+        String email = normalizeEmail(req.email());
+        if (email.isEmpty() || req.password() == null || req.password().isEmpty()) {
+            throw new BizException("请填写邮箱和密码");
+        }
+        User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new BizException("邮箱或密码错误"));
         if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
             throw new BizException("邮箱或密码错误");
         }
         String token = jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name());
         return new AuthDtos.AuthResponse(token, toProfile(user));
+    }
+
+    private static String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase();
     }
 
     public AuthDtos.UserProfileResponse profile(Long userId) {

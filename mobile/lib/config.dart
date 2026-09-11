@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 /// 默认连云端；可用 --dart-define=API_BASE=... 覆盖
 const String _defaultApi = 'http://119.23.45.226:8080';
 const String _defaultWs = 'ws://119.23.45.226:8080/ws';

@@ -43,6 +43,9 @@ app:
   jwt:
     secret: ${JWT_SECRET:lucky-sign-dev-secret-change-me-please-32bytes-min}
     expire-days: 7
+  cors:
+    # 逗号分隔；原生 App 不依赖 CORS。Web 调试可设为 http://localhost:* 或具体域名
+    allowed-origins: ${CORS_ORIGINS:*}
   upload:
     dir: ./uploads
   download:

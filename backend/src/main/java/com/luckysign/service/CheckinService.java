@@ -8,11 +8,9 @@ import com.luckysign.dto.CheckinDtos;
 import com.luckysign.dto.RatingDtos;
 import com.luckysign.entity.CheckinRecord;
 import com.luckysign.entity.DailyDraw;
-import com.luckysign.entity.PointsLog;
 import com.luckysign.entity.User;
 import com.luckysign.repository.CheckinRecordRepository;
 import com.luckysign.repository.DailyDrawRepository;
-import com.luckysign.repository.PointsLogRepository;
 import com.luckysign.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,7 +25,7 @@ public class CheckinService {
     private final UserRepository userRepository;
     private final DailyDrawRepository dailyDrawRepository;
     private final CheckinRecordRepository checkinRecordRepository;
-    private final PointsLogRepository pointsLogRepository;
+    private final PointsService pointsService;
     private final DrawService drawService;
     private final TitleService titleService;
     private final ChatService chatService;
@@ -37,7 +35,7 @@ public class CheckinService {
     public CheckinService(UserRepository userRepository,
                           DailyDrawRepository dailyDrawRepository,
                           CheckinRecordRepository checkinRecordRepository,
-                          PointsLogRepository pointsLogRepository,
+                          PointsService pointsService,
                           DrawService drawService,
                           TitleService titleService,
                           ChatService chatService,
@@ -46,7 +44,7 @@ public class CheckinService {
         this.userRepository = userRepository;
         this.dailyDrawRepository = dailyDrawRepository;
         this.checkinRecordRepository = checkinRecordRepository;
-        this.pointsLogRepository = pointsLogRepository;
+        this.pointsService = pointsService;
         this.drawService = drawService;
         this.titleService = titleService;
         this.chatService = chatService;
@@ -158,15 +156,7 @@ public class CheckinService {
     }
 
     private void applyPoints(User user, int delta, PointChangeType type, Long relatedId) {
-        int next = Math.max(0, user.getPoints() + delta);
-        user.setPoints(next);
-        PointsLog log = new PointsLog();
-        log.setUserId(user.getId());
-        log.setChangeType(type);
-        log.setDelta(delta);
-        log.setBalanceAfter(next);
-        log.setRelatedId(relatedId);
-        pointsLogRepository.save(log);
+        pointsService.apply(user, delta, type, relatedId);
     }
 
     private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw) {

@@ -31,7 +31,30 @@ class LuckySignApp extends StatelessWidget {
   }
 }
 
-Future<void> logoutAndGoLogin(BuildContext context) async {
+Future<bool> confirmLogout(BuildContext context) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('退出登录'),
+      content: const Text('确定要退出当前账号吗？'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC0392B)),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('退出'),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
+}
+
+Future<void> logoutAndGoLogin(BuildContext context, {bool askConfirm = true}) async {
+  if (askConfirm) {
+    final ok = await confirmLogout(context);
+    if (!ok) return;
+  }
   await ApiClient.instance.saveToken(null);
   await ChatInbox.instance.reset();
   final prefs = await SharedPreferences.getInstance();

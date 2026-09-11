@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
 import '../theme.dart';
+import '../utils/errors.dart';
 import '../widgets/ui_bits.dart';
 
 class RankScreen extends StatefulWidget {
@@ -31,7 +32,7 @@ class _RankScreenState extends State<RankScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = formatError(e));
     }
   }
 

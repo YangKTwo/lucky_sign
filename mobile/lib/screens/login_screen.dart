@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
 import '../theme.dart';
+import '../utils/errors.dart';
 import 'home_shell.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -12,23 +13,32 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _nickname = TextEditingController();
+  final _confirmPassword = TextEditingController();
   bool _registerMode = false;
   bool _loading = false;
   bool _obscure = true;
+  bool _obscureConfirm = true;
   String? _error;
+
+  static final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
   @override
   void dispose() {
     _email.dispose();
     _password.dispose();
     _nickname.dispose();
+    _confirmPassword.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
     setState(() {
       _loading = true;
       _error = null;
@@ -41,8 +51,14 @@ class _LoginScreenState extends State<LoginScreen> {
         if (_registerMode) 'nickname': _nickname.text.trim(),
       };
       final res = await ApiClient.instance.postJson(path, body);
-      final data = res['data'] as Map<String, dynamic>;
-      final token = data['token'] as String;
+      final data = res['data'] as Map<String, dynamic>?;
+      if (data == null) {
+        throw Exception('登录响应异常，请稍后重试');
+      }
+      final token = data['token'] as String?;
+      if (token == null || token.isEmpty) {
+        throw Exception('未拿到登录凭证，请重试');
+      }
       final profile = data['profile'] as Map<String, dynamic>?;
       await ApiClient.instance.saveToken(token);
       final id = profile?['id'];
@@ -52,14 +68,24 @@ class _LoginScreenState extends State<LoginScreen> {
         await ApiClient.instance.saveUserId(id.toInt());
       }
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
+      Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const HomeShell()),
+        (_) => false,
       );
     } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      if (!mounted) return;
+      setState(() => _error = formatError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _toggleMode() {
+    setState(() {
+      _registerMode = !_registerMode;
+      _error = null;
+      _confirmPassword.clear();
+    });
   }
 
   @override
@@ -74,92 +100,148 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
         child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
-            children: [
-              const SizedBox(height: 12),
-              const Text('🍀', style: TextStyle(fontSize: 48)),
-              const SizedBox(height: 8),
-              const Text(
-                '今日幸运签',
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: AppColors.ink),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _registerMode ? '注册后自动进入小圈子' : '每天一签，完成任务攒积分',
-                style: const TextStyle(fontSize: 15, color: Color(0xFF7A7068)),
-              ),
-              const SizedBox(height: 28),
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.92),
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 18, offset: Offset(0, 8))],
+          child: Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
+              children: [
+                const SizedBox(height: 12),
+                const Text('🍀', style: TextStyle(fontSize: 48)),
+                const SizedBox(height: 8),
+                const Text(
+                  '今日幸运签',
+                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: AppColors.ink),
                 ),
-                child: Column(
-                  children: [
-                    if (_registerMode) ...[
-                      TextField(
-                        controller: _nickname,
+                const SizedBox(height: 6),
+                Text(
+                  _registerMode ? '注册后自动进入小圈子' : '每天一签，完成任务攒积分',
+                  style: const TextStyle(fontSize: 15, color: Color(0xFF7A7068)),
+                ),
+                const SizedBox(height: 28),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.92),
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 18, offset: Offset(0, 8))],
+                  ),
+                  child: Column(
+                    children: [
+                      if (_registerMode) ...[
+                        TextFormField(
+                          controller: _nickname,
+                          textInputAction: TextInputAction.next,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          decoration: const InputDecoration(
+                            labelText: '昵称',
+                            prefixIcon: Icon(Icons.person_outline),
+                          ),
+                          validator: (v) {
+                            final t = v?.trim() ?? '';
+                            if (t.isEmpty) return '请填写昵称';
+                            if (t.length > 32) return '昵称最多 32 字';
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      TextFormField(
+                        controller: _email,
+                        keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(labelText: '昵称', prefixIcon: Icon(Icons.person_outline)),
+                        autofillHints: const [AutofillHints.email],
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        decoration: const InputDecoration(
+                          labelText: '邮箱',
+                          prefixIcon: Icon(Icons.mail_outline),
+                        ),
+                        validator: (v) {
+                          final t = v?.trim() ?? '';
+                          if (t.isEmpty) return '请填写邮箱';
+                          if (!_emailRegex.hasMatch(t)) return '邮箱格式不正确';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 12),
-                    ],
-                    TextField(
-                      controller: _email,
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(labelText: '邮箱', prefixIcon: Icon(Icons.mail_outline)),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _password,
-                      obscureText: _obscure,
-                      onSubmitted: (_) => _submit(),
-                      decoration: InputDecoration(
-                        labelText: '密码',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          onPressed: () => setState(() => _obscure = !_obscure),
-                          icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                      TextFormField(
+                        controller: _password,
+                        obscureText: _obscure,
+                        textInputAction: _registerMode ? TextInputAction.next : TextInputAction.done,
+                        autofillHints: [
+                          _registerMode ? AutofillHints.newPassword : AutofillHints.password,
+                        ],
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        onFieldSubmitted: (_) {
+                          if (!_registerMode) _submit();
+                        },
+                        decoration: InputDecoration(
+                          labelText: '密码',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          suffixIcon: IconButton(
+                            onPressed: () => setState(() => _obscure = !_obscure),
+                            icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                          ),
+                        ),
+                        validator: (v) {
+                          final t = v ?? '';
+                          if (t.isEmpty) return '请填写密码';
+                          if (_registerMode && t.length < 6) return '密码至少 6 位';
+                          return null;
+                        },
+                      ),
+                      if (_registerMode) ...[
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _confirmPassword,
+                          obscureText: _obscureConfirm,
+                          textInputAction: TextInputAction.done,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          onFieldSubmitted: (_) => _submit(),
+                          decoration: InputDecoration(
+                            labelText: '确认密码',
+                            prefixIcon: const Icon(Icons.lock_outline),
+                            suffixIcon: IconButton(
+                              onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                              icon: Icon(
+                                _obscureConfirm ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                              ),
+                            ),
+                          ),
+                          validator: (v) {
+                            if ((v ?? '') != _password.text) return '两次密码不一致';
+                            return null;
+                          },
+                        ),
+                      ],
+                      if (_error != null) ...[
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.accent,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          onPressed: _loading ? null : _submit,
+                          child: Text(_loading ? '请稍候…' : (_registerMode ? '加入圈子' : '进入今日')),
                         ),
                       ),
-                    ),
-                    if (_error != null) ...[
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
+                      TextButton(
+                        onPressed: _loading ? null : _toggleMode,
+                        child: Text(_registerMode ? '已有账号？去登录' : '没有账号？去注册'),
                       ),
                     ],
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.accent,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        onPressed: _loading ? null : _submit,
-                        child: Text(_loading ? '请稍候…' : (_registerMode ? '加入圈子' : '进入今日')),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: _loading
-                          ? null
-                          : () => setState(() {
-                                _registerMode = !_registerMode;
-                                _error = null;
-                              }),
-                      child: Text(_registerMode ? '已有账号？去登录' : '没有账号？去注册'),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

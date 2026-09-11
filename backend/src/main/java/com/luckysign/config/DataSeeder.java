@@ -58,11 +58,12 @@ public class DataSeeder implements CommandLineRunner {
             return circleRepository.save(c);
         });
 
+        String adminPassword = System.getenv().getOrDefault("ADMIN_PASSWORD", "admin123");
         User admin = userRepository.findByEmail("admin@luckysign.local").orElseGet(() -> {
             User u = new User();
             u.setEmail("admin@luckysign.local");
             u.setNickname("管理员");
-            u.setPasswordHash(passwordEncoder.encode("admin123"));
+            u.setPasswordHash(passwordEncoder.encode(adminPassword));
             u.setRole(UserRole.ADMIN);
             u.setTitle(titleService.resolve(0));
             u.setTag(UserTag.NONE);
@@ -83,7 +84,7 @@ public class DataSeeder implements CommandLineRunner {
             circle.setMemberCount(circle.getMemberCount() + 1);
             circleRepository.save(circle);
         }
-        log.info("Seed admin ready: admin@luckysign.local / admin123");
+        log.info("Seed admin ready: admin@luckysign.local (set ADMIN_PASSWORD to override default)");
     }
 
     private void seedTasks() {
