@@ -33,7 +33,7 @@ public class AuthController {
     }
 
     @PostMapping("/auth/refresh")
-    public ApiResponse<AuthDtos.AuthResponse> refresh(@RequestBody AuthDtos.RefreshRequest request) {
+    public ApiResponse<AuthDtos.AuthResponse> refresh(@Valid @RequestBody AuthDtos.RefreshRequest request) {
         return ApiResponse.ok(authService.refresh(request.refreshToken()));
     }
 

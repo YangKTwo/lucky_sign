@@ -1,6 +1,7 @@
 package com.luckysign.controller;
 
 import com.luckysign.dto.ChatDtos;
+import com.luckysign.security.CircleAccessGuard;
 import com.luckysign.security.UserPrincipal;
 import com.luckysign.service.ChatService;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -13,9 +14,11 @@ import java.security.Principal;
 @Controller
 public class ChatWsController {
     private final ChatService chatService;
+    private final CircleAccessGuard circleAccessGuard;
 
-    public ChatWsController(ChatService chatService) {
+    public ChatWsController(ChatService chatService, CircleAccessGuard circleAccessGuard) {
         this.chatService = chatService;
+        this.circleAccessGuard = circleAccessGuard;
     }
 
     @MessageMapping("/chat.send")
@@ -24,6 +27,7 @@ public class ChatWsController {
         if (userId == null) {
             throw new IllegalStateException("Unauthorized");
         }
+        circleAccessGuard.requireMember(userId);
         chatService.sendText(userId, request.content());
     }
 

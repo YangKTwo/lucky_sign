@@ -147,7 +147,8 @@ public class AiAssistantService {
 
     @Deprecated
     public String ask(String userNickname, String question) {
-        return ask(null, userNickname, question);
+        throw new UnsupportedOperationException(
+                "Deprecated ask(String, String) is blocked. Use ask(Long userId, String, String) to enforce quota.");
     }
 
     private boolean checkAndConsumeQuota(Long userId) {
