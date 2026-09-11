@@ -2,10 +2,33 @@
 
 > **k2/k4 Items**: #2 (No fake "just rerun"), #5 (Dual-table merge), #10 (Full runbook), #12 (No auto-repair)
 
+---
+
+## ⛔ 重要警告：禁止手工 MySQL 迁移
+
+**绝对不要**使用 `mysql` 客户端直接执行迁移 SQL 文件，然后手动插入 `flyway_schema_history` 记录。
+
+```sql
+-- ❌ 错误做法 - 不要这样做！
+mysql mydb < V3__xxx.sql
+INSERT INTO flyway_schema_history (version, checksum, ...) VALUES ('3', 0, ...);
+```
+
+**原因**：
+1. 手动插入的 `checksum=0` 与 Flyway 计算的真实 checksum 不匹配
+2. Spring Boot 启动时 Flyway 会验证 checksum，发现不匹配会**立即失败**
+3. 这会导致应用无法启动，需要手动修复 `flyway_schema_history`
+
+**正确做法**：
+- 使用 `migrate.sh` 或 `start-backend.sh --migrate-only`
+- 这些脚本使用真实的 Flyway API，自动计算正确的 checksum
+
+---
+
 ## 解锁顺序（生产环境）
 
 ```
-freeze Restart → backup → inventory → merge → repair → Deploy → start app
+freeze Restart → backup → inventory → repair → Deploy → migrate.sh → start app
 ```
 
 ---
@@ -323,15 +346,25 @@ SELECT id, template_name FROM email_logs WHERE template_name IS NOT NULL;
 ./deploy/start-backend.sh
 ```
 
-### migrate.sh 用法
+### migrate.sh 用法（推荐）
 
 ```bash
-./deploy/migrate.sh              # 运行迁移
-./deploy/migrate.sh --check      # 仅检查失败迁移
-./deploy/migrate.sh --info       # 显示迁移状态
+./deploy/migrate.sh              # 运行迁移（使用真实 Flyway API）
+./deploy/migrate.sh info         # 显示迁移状态
+./deploy/migrate.sh validate     # 验证迁移（检查 checksum）
+./deploy/migrate.sh repair       # 修复 schema history（谨慎使用）
 ```
 
-**注意**：`migrate.sh` 从 JAR 提取迁移文件运行，不需要 backend 源码目录。
+**特性**：
+- 使用真实 Flyway API（不是 mysql 客户端）
+- 自动计算正确的 checksum
+- 从 JAR 提取迁移文件，不需要 backend 源码
+- 配置与 Spring Boot 一致：`baselineOnMigrate=true`, `baselineVersion=0`
+
+**依赖**：
+- Java 17+ (JRE 或 JDK)
+- 应用 JAR 已部署（包含 Flyway 库）
+- 如果没有预编译的 `FlywayRunner.class`，需要 JDK（javac）
 
 ### SQL 快查
 
@@ -363,6 +396,51 @@ git checkout <previous_commit>
 mvn clean package -DskipTests
 ./deploy/start-backend.sh
 ```
+
+---
+
+---
+
+## 场景 D: Checksum 不匹配
+
+如果 Spring Boot 启动失败，报错类似：
+
+```
+FlywayValidateException: Validate failed: 
+Migration checksum mismatch for migration version 3
+-> Applied to database : 0
+-> Resolved locally    : -1234567890
+```
+
+### 原因
+
+有人使用 mysql 客户端直接执行了迁移 SQL，然后手动插入了 `checksum=0` 的记录。
+
+### 修复步骤
+
+1. **备份数据库**
+
+2. **使用 Flyway repair 修复 checksum**：
+```bash
+./deploy/migrate.sh repair
+```
+
+这会用正确的 checksum 更新 `flyway_schema_history` 中的记录。
+
+3. **验证修复**：
+```bash
+./deploy/migrate.sh validate
+```
+
+4. **启动应用**：
+```bash
+./deploy/start-backend.sh
+```
+
+### 预防
+
+- **永远不要**手动执行迁移 SQL + 插入 history 记录
+- 始终使用 `migrate.sh` 或 Spring Boot 自动迁移
 
 ---
 

@@ -2,26 +2,37 @@
 # ============================================================================
 # Lucky Sign Standalone Migration Script
 # ============================================================================
-# Runs Flyway migrations WITHOUT starting Spring Boot application.
+# Runs Flyway migrations using REAL Flyway API — no fake checksums.
 # Works in production where backend/ source directory is not available.
+#
+# IMPORTANT: This script uses real Flyway with proper checksums.
+# DO NOT use raw mysql client to apply migrations — that creates
+# incompatible flyway_schema_history entries that will break validation.
 #
 # Usage:
 #   ./migrate.sh                    # Run migrations
-#   ./migrate.sh --check            # Check for failed migrations only
-#   ./migrate.sh --info             # Show migration status
+#   ./migrate.sh info               # Show migration status
+#   ./migrate.sh validate           # Validate migrations
+#   ./migrate.sh repair             # Repair schema history (caution!)
 #
 # Required environment (from run.env or exported):
 #   MYSQL_PASSWORD
 #   MYSQL_USER (default: root)
 #   MYSQL_URL (default: jdbc:mysql://127.0.0.1:3306/lucky_sign?...)
 #
+# Required tooling:
+#   - Java 17+ (JDK for compilation, or JRE with pre-compiled FlywayRunner)
+#   - Flyway libraries (extracted from app JAR)
+#
 # Exit codes:
 #   0 - Success
 #   1 - Configuration error
-#   2 - Migration failed / failed migrations detected
+#   2 - Migration/validation failed
+#   3 - Missing required tooling (Java/Flyway)
 # ============================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="/www/wwwroot/lucky-api"
 JAR_PATH="${APP_DIR}/lucky-sign-0.0.1-SNAPSHOT.jar"
 MIGRATE_DIR="${APP_DIR}/flyway-migrations"
@@ -29,24 +40,29 @@ FLYWAY_LOG="${APP_DIR}/flyway-migrate.log"
 ENV_FILE="${APP_DIR}/run.env"
 
 # Parse arguments
-ACTION="migrate"
-while [[ $# -gt 0 ]]; do
+COMMAND="migrate"
+if [[ $# -gt 0 ]]; then
   case $1 in
-    --check)
-      ACTION="check"
-      shift
+    migrate|info|validate|repair)
+      COMMAND="$1"
       ;;
-    --info)
-      ACTION="info"
-      shift
+    --help|-h)
+      echo "Usage: $0 [migrate|info|validate|repair]"
+      echo ""
+      echo "Commands:"
+      echo "  migrate   Run pending migrations (default)"
+      echo "  info      Show migration status"
+      echo "  validate  Validate applied migrations"
+      echo "  repair    Repair schema history (use with caution)"
+      exit 0
       ;;
     *)
-      echo "Unknown option: $1" >&2
-      echo "Usage: $0 [--check|--info]" >&2
+      echo "ERROR: Unknown command: $1" >&2
+      echo "Usage: $0 [migrate|info|validate|repair]" >&2
       exit 1
       ;;
   esac
-done
+fi
 
 # Load environment
 MYSQL_USER="${MYSQL_USER:-root}"
@@ -65,260 +81,186 @@ if [[ -z "${MYSQL_PASSWORD}" ]]; then
   exit 1
 fi
 
-# Extract DB connection info from JDBC URL
-parse_jdbc_url() {
-  local url="$1"
-  DB_HOST=$(echo "${url}" | sed -n 's|.*://\([^:/]*\).*|\1|p')
-  DB_PORT=$(echo "${url}" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
-  DB_NAME=$(echo "${url}" | sed -n 's|.*/\([^?]*\).*|\1|p')
-  
-  DB_HOST="${DB_HOST:-127.0.0.1}"
-  DB_PORT="${DB_PORT:-3306}"
-  DB_NAME="${DB_NAME:-lucky_sign}"
-}
+# ============================================================================
+# Check required tooling
+# ============================================================================
 
-# Check for failed migrations using direct MySQL query
-check_failed_migrations() {
-  echo "Checking for failed migrations..."
-  parse_jdbc_url "${MYSQL_URL}"
-  
-  local result
-  if ! result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
-    -N -e "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 0;" "${DB_NAME}" 2>&1); then
-    echo "ERROR: Failed to query flyway_schema_history" >&2
-    echo "${result}" >&2
-    exit 2
+check_java() {
+  if ! command -v java &> /dev/null; then
+    echo "ERROR: Java not found. Install JDK 17+ or JRE." >&2
+    echo "On Ubuntu: sudo apt install openjdk-17-jre-headless" >&2
+    exit 3
   fi
   
-  local failed_count="${result}"
-  
-  if [[ "${failed_count}" -gt 0 ]]; then
-    echo "ERROR: Found ${failed_count} failed migration(s)" >&2
-    echo "See deploy/flyway-repair-notes.md for repair instructions" >&2
-    mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
-      -e "SELECT version, description, success, installed_on FROM flyway_schema_history WHERE success = 0;" "${DB_NAME}" 2>/dev/null || true
-    exit 2
+  local java_version
+  java_version=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
+  if [[ "${java_version}" -lt 17 ]]; then
+    echo "ERROR: Java 17+ required, found version ${java_version}" >&2
+    exit 3
   fi
-  
-  echo "No failed migrations found"
 }
 
-# Show migration info
-show_info() {
-  echo "Migration status:"
-  parse_jdbc_url "${MYSQL_URL}"
-  
-  mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
-    -e "SELECT version, description, type, installed_on, success FROM flyway_schema_history ORDER BY installed_rank;" "${DB_NAME}" 2>/dev/null || {
-    echo "No flyway_schema_history table found (fresh database)"
-  }
-}
-
-# Extract migrations from JAR and run them
-run_migrations() {
-  echo "=== Flyway Migration (Standalone) ==="
-  
+check_jar() {
   if [[ ! -f "${JAR_PATH}" ]]; then
-    echo "ERROR: JAR not found: ${JAR_PATH}" >&2
+    echo "ERROR: Application JAR not found: ${JAR_PATH}" >&2
+    echo "Deploy the JAR first before running migrations." >&2
     exit 1
   fi
+}
+
+# ============================================================================
+# Setup Flyway environment
+# ============================================================================
+
+setup_flyway_env() {
+  echo "Setting up Flyway environment..."
   
-  # Check for failed migrations first
-  parse_jdbc_url "${MYSQL_URL}"
-  local failed_check
-  if failed_check=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
-    -N -e "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 0;" "${DB_NAME}" 2>/dev/null); then
-    if [[ "${failed_check}" -gt 0 ]]; then
-      echo "ERROR: Cannot migrate - ${failed_check} failed migration(s) exist" >&2
-      echo "See deploy/flyway-repair-notes.md for repair instructions" >&2
-      exit 2
-    fi
-  fi
-  # If table doesn't exist yet, that's OK - fresh database
+  rm -rf "${MIGRATE_DIR}"
+  mkdir -p "${MIGRATE_DIR}/lib"
   
   # Extract migration SQL files from JAR
   echo "Extracting migrations from JAR..."
-  rm -rf "${MIGRATE_DIR}"
-  mkdir -p "${MIGRATE_DIR}"
-  
-  # Use unzip to extract db/migration directory
   if ! unzip -q -j "${JAR_PATH}" "BOOT-INF/classes/db/migration/*.sql" -d "${MIGRATE_DIR}" 2>/dev/null; then
-    # Try alternative path for non-Boot JARs
     unzip -q -j "${JAR_PATH}" "db/migration/*.sql" -d "${MIGRATE_DIR}" 2>/dev/null || {
       echo "ERROR: Could not extract migrations from JAR" >&2
       exit 1
     }
   fi
   
-  echo "Extracted migrations:"
-  ls -la "${MIGRATE_DIR}"/*.sql 2>/dev/null || {
-    echo "ERROR: No migration files found" >&2
+  local sql_count
+  sql_count=$(ls -1 "${MIGRATE_DIR}"/*.sql 2>/dev/null | wc -l)
+  if [[ "${sql_count}" -eq 0 ]]; then
+    echo "ERROR: No migration SQL files found in JAR" >&2
     exit 1
-  }
+  fi
+  echo "Found ${sql_count} migration files"
   
-  # Run migrations using Java + Flyway (from JAR classpath)
-  # This approach uses Flyway's API without Spring Boot context
-  echo "Running Flyway migrate..."
-  echo "Log: ${FLYWAY_LOG}"
+  # Extract Flyway libraries from JAR
+  echo "Extracting Flyway libraries..."
+  unzip -q -j "${JAR_PATH}" "BOOT-INF/lib/flyway-core-*.jar" -d "${MIGRATE_DIR}/lib" 2>/dev/null || true
+  unzip -q -j "${JAR_PATH}" "BOOT-INF/lib/flyway-mysql-*.jar" -d "${MIGRATE_DIR}/lib" 2>/dev/null || true
+  unzip -q -j "${JAR_PATH}" "BOOT-INF/lib/mysql-connector-*.jar" -d "${MIGRATE_DIR}/lib" 2>/dev/null || true
+  unzip -q -j "${JAR_PATH}" "BOOT-INF/lib/slf4j-api-*.jar" -d "${MIGRATE_DIR}/lib" 2>/dev/null || true
   
-  # Create a minimal Java class to run Flyway
-  local RUNNER_CLASS="${MIGRATE_DIR}/FlywayRunner.java"
-  cat > "${RUNNER_CLASS}" << 'JAVA_EOF'
-import org.flywaydb.core.Flyway;
-
-public class FlywayRunner {
-    public static void main(String[] args) {
-        if (args.length < 3) {
-            System.err.println("Usage: FlywayRunner <url> <user> <password> <locations>");
-            System.exit(1);
-        }
-        
-        String url = args[0];
-        String user = args[1];
-        String password = args[2];
-        String locations = args.length > 3 ? args[3] : "filesystem:./";
-        
-        try {
-            Flyway flyway = Flyway.configure()
-                .dataSource(url, user, password)
-                .locations(locations)
-                .load();
-            
-            flyway.migrate();
-            System.out.println("Migration completed successfully");
-            System.exit(0);
-        } catch (Exception e) {
-            System.err.println("Migration failed: " + e.getMessage());
-            e.printStackTrace();
-            System.exit(2);
-        }
-    }
+  # Check if we have the required libraries
+  if ! ls "${MIGRATE_DIR}/lib"/flyway-core-*.jar &>/dev/null; then
+    echo "ERROR: Could not extract flyway-core from JAR" >&2
+    echo "Ensure the application JAR contains Flyway dependencies." >&2
+    exit 3
+  fi
+  
+  if ! ls "${MIGRATE_DIR}/lib"/mysql-connector-*.jar &>/dev/null; then
+    echo "ERROR: Could not extract MySQL connector from JAR" >&2
+    exit 3
+  fi
+  
+  echo "Flyway libraries extracted successfully"
 }
-JAVA_EOF
 
-  # Compile and run the Flyway runner
-  # Use the JAR's classpath for Flyway dependencies
+# ============================================================================
+# Build classpath
+# ============================================================================
+
+build_classpath() {
+  local cp=""
+  for jar in "${MIGRATE_DIR}/lib"/*.jar; do
+    [[ -f "$jar" ]] && cp="${cp}:${jar}"
+  done
+  echo "${cp#:}"  # Remove leading colon
+}
+
+# ============================================================================
+# Compile or use pre-compiled FlywayRunner
+# ============================================================================
+
+prepare_runner() {
+  local runner_class="${MIGRATE_DIR}/FlywayRunner.class"
+  local runner_source="${SCRIPT_DIR}/FlywayRunner.java"
+  
+  # Check for pre-compiled runner (shipped with deploy artifacts)
+  if [[ -f "${SCRIPT_DIR}/FlywayRunner.class" ]]; then
+    cp "${SCRIPT_DIR}/FlywayRunner.class" "${MIGRATE_DIR}/"
+    echo "Using pre-compiled FlywayRunner"
+    return 0
+  fi
+  
+  # Need to compile
+  if [[ ! -f "${runner_source}" ]]; then
+    echo "ERROR: FlywayRunner.java not found at ${runner_source}" >&2
+    echo "Ensure FlywayRunner.java is in the deploy directory." >&2
+    exit 3
+  fi
+  
+  # Check for javac
+  if ! command -v javac &> /dev/null; then
+    echo "ERROR: javac (Java compiler) not found." >&2
+    echo "Either:" >&2
+    echo "  1. Install JDK: sudo apt install openjdk-17-jdk-headless" >&2
+    echo "  2. Ship pre-compiled FlywayRunner.class with deploy artifacts" >&2
+    exit 3
+  fi
+  
+  echo "Compiling FlywayRunner..."
+  local cp
+  cp=$(build_classpath)
+  
+  if ! javac -cp "${cp}" -d "${MIGRATE_DIR}" "${runner_source}" 2>&1; then
+    echo "ERROR: Failed to compile FlywayRunner" >&2
+    exit 3
+  fi
+  
+  echo "FlywayRunner compiled successfully"
+}
+
+# ============================================================================
+# Run Flyway command
+# ============================================================================
+
+run_flyway() {
+  local command="$1"
+  
+  echo "=== Flyway ${command} ==="
+  echo "URL: ${MYSQL_URL}"
+  echo "User: ${MYSQL_USER}"
+  echo "Migrations: ${MIGRATE_DIR}"
+  echo "Log: ${FLYWAY_LOG}"
+  echo ""
+  
+  local cp
+  cp=$(build_classpath)
+  
   cd "${MIGRATE_DIR}"
   
-  # Extract Flyway and MySQL connector from the JAR for classpath
-  local LIB_DIR="${MIGRATE_DIR}/lib"
-  mkdir -p "${LIB_DIR}"
-  
-  # For Spring Boot fat JAR, libraries are in BOOT-INF/lib
-  unzip -q -j "${JAR_PATH}" "BOOT-INF/lib/flyway-core-*.jar" -d "${LIB_DIR}" 2>/dev/null || true
-  unzip -q -j "${JAR_PATH}" "BOOT-INF/lib/flyway-mysql-*.jar" -d "${LIB_DIR}" 2>/dev/null || true
-  unzip -q -j "${JAR_PATH}" "BOOT-INF/lib/mysql-connector-*.jar" -d "${LIB_DIR}" 2>/dev/null || true
-  
-  # Build classpath
-  local CP=""
-  for jar in "${LIB_DIR}"/*.jar; do
-    [[ -f "$jar" ]] && CP="${CP}:${jar}"
-  done
-  CP="${CP#:}"  # Remove leading colon
-  
-  if [[ -z "${CP}" ]]; then
-    echo "ERROR: Could not extract Flyway libraries from JAR" >&2
-    echo "Falling back to direct SQL execution..." >&2
-    run_migrations_via_mysql
-    return
-  fi
-  
-  # Compile
-  if ! javac -cp "${CP}" FlywayRunner.java > "${FLYWAY_LOG}" 2>&1; then
-    echo "ERROR: Failed to compile FlywayRunner" >&2
-    cat "${FLYWAY_LOG}" >&2
-    echo "Falling back to direct SQL execution..." >&2
-    run_migrations_via_mysql
-    return
-  fi
-  
-  # Run
-  if ! java -cp ".:${CP}" FlywayRunner \
-    "${MYSQL_URL}" "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
-    "filesystem:${MIGRATE_DIR}" >> "${FLYWAY_LOG}" 2>&1; then
-    echo "ERROR: Migration failed" >&2
-    tail -n 50 "${FLYWAY_LOG}" >&2
+  # Run FlywayRunner with real Flyway API
+  # Config aligns with Spring Boot: baselineOnMigrate=true, baselineVersion=0
+  if ! java -cp ".:${cp}" FlywayRunner \
+    "${command}" \
+    "${MYSQL_URL}" \
+    "${MYSQL_USER}" \
+    "${MYSQL_PASSWORD}" \
+    "filesystem:${MIGRATE_DIR}" \
+    2>&1 | tee "${FLYWAY_LOG}"; then
+    
+    echo "" >&2
+    echo "ERROR: Flyway ${command} failed" >&2
+    echo "See ${FLYWAY_LOG} for details" >&2
     exit 2
   fi
   
-  echo "Migration completed successfully"
-  
-  # Cleanup
-  rm -rf "${LIB_DIR}" FlywayRunner.java FlywayRunner.class
+  echo ""
+  echo "Flyway ${command} completed successfully"
 }
 
-# Fallback: run migrations directly via MySQL client
-# This is simpler but doesn't get Flyway's versioning benefits
-run_migrations_via_mysql() {
-  echo "Running migrations via MySQL client (fallback)..."
-  parse_jdbc_url "${MYSQL_URL}"
-  
-  # Check current version
-  local current_version
-  current_version=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
-    -N -e "SELECT COALESCE(MAX(version), '0') FROM flyway_schema_history WHERE success = 1;" "${DB_NAME}" 2>/dev/null || echo "0")
-  
-  echo "Current version: ${current_version}"
-  
-  # Run each migration file in order
-  for sql_file in "${MIGRATE_DIR}"/V*.sql; do
-    [[ -f "${sql_file}" ]] || continue
-    
-    local filename=$(basename "${sql_file}")
-    local version=$(echo "${filename}" | sed -n 's/^V\([0-9]*\)__.*/\1/p')
-    
-    if [[ "${version}" -le "${current_version}" ]]; then
-      echo "Skipping ${filename} (already applied)"
-      continue
-    fi
-    
-    echo "Applying ${filename}..."
-    if ! mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
-      "${DB_NAME}" < "${sql_file}" >> "${FLYWAY_LOG}" 2>&1; then
-      echo "ERROR: Failed to apply ${filename}" >&2
-      tail -n 30 "${FLYWAY_LOG}" >&2
-      exit 2
-    fi
-    
-    # Record in flyway_schema_history (simplified)
-    local description=$(echo "${filename}" | sed 's/^V[0-9]*__//; s/\.sql$//' | tr '_' ' ')
-    mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
-      -e "INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success) 
-          SELECT COALESCE(MAX(installed_rank), 0) + 1, '${version}', '${description}', 'SQL', '${filename}', 0, '${MYSQL_USER}', 0, 1 
-          FROM flyway_schema_history;" "${DB_NAME}" 2>/dev/null || {
-      # Create table if it doesn't exist
-      mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
-        -e "CREATE TABLE IF NOT EXISTS flyway_schema_history (
-              installed_rank INT NOT NULL,
-              version VARCHAR(50),
-              description VARCHAR(200) NOT NULL,
-              type VARCHAR(20) NOT NULL,
-              script VARCHAR(1000) NOT NULL,
-              checksum INT,
-              installed_by VARCHAR(100) NOT NULL,
-              installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              execution_time INT NOT NULL,
-              success TINYINT(1) NOT NULL,
-              PRIMARY KEY (installed_rank)
-            );" "${DB_NAME}"
-      mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
-        -e "INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success) 
-            VALUES (1, '${version}', '${description}', 'SQL', '${filename}', 0, '${MYSQL_USER}', 0, 1);" "${DB_NAME}"
-    }
-  done
-  
-  echo "Migration completed (MySQL fallback mode)"
-}
-
+# ============================================================================
 # Main
-case "${ACTION}" in
-  check)
-    check_failed_migrations
-    ;;
-  info)
-    show_info
-    ;;
-  migrate)
-    run_migrations
-    ;;
-esac
+# ============================================================================
+
+echo "=== Lucky Sign Migration Script ==="
+echo "Command: ${COMMAND}"
+echo ""
+
+check_java
+check_jar
+setup_flyway_env
+prepare_runner
+run_flyway "${COMMAND}"
