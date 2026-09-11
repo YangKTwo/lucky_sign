@@ -30,11 +30,11 @@
 # ============================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="/www/wwwroot/lucky-api"
 JAR_NAME="lucky-sign-0.0.1-SNAPSHOT.jar"
 JAR_PATH="${APP_DIR}/${JAR_NAME}"
 LOG_PATH="${APP_DIR}/lucky-sign.log"
-FLYWAY_LOG="${APP_DIR}/flyway-migrate.log"
 ENV_FILE="${APP_DIR}/run.env"
 PID_MATCH="lucky-sign-0.0.1-SNAPSHOT.jar"
 
@@ -106,7 +106,6 @@ validate_full_config() {
 
 # Extract DB connection info from JDBC URL
 parse_jdbc_url() {
-  # jdbc:mysql://host:port/dbname?params -> host, port, dbname
   local url="$1"
   DB_HOST=$(echo "${url}" | sed -n 's|.*://\([^:/]*\).*|\1|p')
   DB_PORT=$(echo "${url}" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
@@ -117,12 +116,11 @@ parse_jdbc_url() {
   DB_NAME="${DB_NAME:-lucky_sign}"
 }
 
-# k4 fix: --check-flyway fails closed (no || echo 0 that swallows errors)
+# k4 fix: --check-flyway fails closed on DB connection errors
 check_flyway_status() {
   echo "Checking Flyway migration status..."
   parse_jdbc_url "${MYSQL_URL}"
   
-  # k4 fix: Do NOT use || echo 0 - let connection failures propagate
   local result
   if ! result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
     -N -e "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 0;" "${DB_NAME}" 2>&1); then
@@ -146,58 +144,142 @@ check_flyway_status() {
     -e "SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 5;" "${DB_NAME}" 2>/dev/null || true
 }
 
-# k4 fix: --migrate-only truly exits after Flyway (uses Maven plugin, not Spring Boot)
+# k4 fix: --migrate-only works without backend source, truly exits
 run_migration_only() {
-  echo "Running Flyway migrations (migrate-only mode)..."
-  echo "Migration log: ${FLYWAY_LOG}"
+  echo "=== Flyway Migration (migrate-only mode) ==="
   
-  parse_jdbc_url "${MYSQL_URL}"
-  
-  # Use Maven Flyway plugin - this runs ONLY Flyway, then exits
-  # No Spring context, no schedulers, no data seeders
-  cd "${APP_DIR}/../backend" 2>/dev/null || cd /opt/backend 2>/dev/null || {
-    # Fallback: if backend source not available, check for maven wrapper or skip
-    echo "WARNING: Backend source directory not found. Using JAR-based migration." >&2
-    echo "For production, ensure backend source is available or use Spring Boot migration." >&2
-    
-    # Alternative: use java -jar with flyway properties (Spring Boot auto-runs on startup)
-    # This is a fallback - not ideal but works
-    java -jar "${JAR_PATH}" \
-      --spring.main.web-application-type=none \
-      --spring.flyway.enabled=true \
-      --spring.jpa.hibernate.ddl-auto=none \
-      --spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.web.servlet.WebMvcAutoConfiguration \
-      --spring.datasource.url="${MYSQL_URL}" \
-      --spring.datasource.username="${MYSQL_USER}" \
-      --spring.datasource.password="${MYSQL_PASSWORD}" \
-      > "${FLYWAY_LOG}" 2>&1 || {
-        echo "ERROR: Migration failed. Check ${FLYWAY_LOG}" >&2
-        tail -n 30 "${FLYWAY_LOG}" >&2 || true
-        exit 2
-      }
-    echo "Migration completed (JAR fallback mode)"
-    exit 0
-  }
-  
-  # Primary path: use Maven Flyway plugin
-  mvn flyway:migrate \
-    -Dflyway.url="${MYSQL_URL}" \
-    -Dflyway.user="${MYSQL_USER}" \
-    -Dflyway.password="${MYSQL_PASSWORD}" \
-    -Dflyway.locations=classpath:db/migration \
-    > "${FLYWAY_LOG}" 2>&1
-  
-  local exit_code=$?
-  
-  if [[ ${exit_code} -ne 0 ]]; then
-    echo "ERROR: Migration failed with exit code ${exit_code}" >&2
-    echo "Last 50 lines of migration log:" >&2
-    tail -n 50 "${FLYWAY_LOG}" >&2 || true
-    echo "" >&2
-    echo "See deploy/flyway-repair-notes.md for troubleshooting" >&2
-    exit 2
+  # Use standalone migrate.sh if available (preferred for production)
+  if [[ -x "${SCRIPT_DIR}/migrate.sh" ]]; then
+    echo "Using standalone migrate.sh..."
+    exec "${SCRIPT_DIR}/migrate.sh"
+    # exec replaces this process, so we never reach here
   fi
   
+  # Fallback: if migrate.sh not available, check if we have backend source
+  local BACKEND_DIR=""
+  for dir in "${APP_DIR}/../backend" "/opt/backend" "${SCRIPT_DIR}/../backend"; do
+    if [[ -d "${dir}" && -f "${dir}/pom.xml" ]]; then
+      BACKEND_DIR="$(cd "${dir}" && pwd)"
+      break
+    fi
+  done
+  
+  if [[ -n "${BACKEND_DIR}" && -f "${BACKEND_DIR}/src/main/resources/db/migration/V1__initial_schema.sql" ]]; then
+    echo "Found backend source at ${BACKEND_DIR}"
+    echo "Using Maven flyway:migrate..."
+    
+    cd "${BACKEND_DIR}"
+    mvn flyway:migrate \
+      -Dflyway.url="${MYSQL_URL}" \
+      -Dflyway.user="${MYSQL_USER}" \
+      -Dflyway.password="${MYSQL_PASSWORD}" \
+      -Dflyway.locations="filesystem:src/main/resources/db/migration"
+    
+    local exit_code=$?
+    if [[ ${exit_code} -ne 0 ]]; then
+      echo "ERROR: Migration failed with exit code ${exit_code}" >&2
+      exit 2
+    fi
+    
+    echo "Migration completed successfully"
+    exit 0
+  fi
+  
+  # Last resort: extract from JAR and run via MySQL client
+  echo "No backend source found. Extracting migrations from JAR..."
+  
+  if [[ ! -f "${JAR_PATH}" ]]; then
+    echo "ERROR: JAR not found: ${JAR_PATH}" >&2
+    echo "Deploy the JAR first, or ensure backend source is available." >&2
+    exit 1
+  fi
+  
+  local MIGRATE_DIR="${APP_DIR}/flyway-migrations"
+  rm -rf "${MIGRATE_DIR}"
+  mkdir -p "${MIGRATE_DIR}"
+  
+  # Extract SQL files
+  if ! unzip -q -j "${JAR_PATH}" "BOOT-INF/classes/db/migration/*.sql" -d "${MIGRATE_DIR}" 2>/dev/null; then
+    unzip -q -j "${JAR_PATH}" "db/migration/*.sql" -d "${MIGRATE_DIR}" 2>/dev/null || {
+      echo "ERROR: Could not extract migrations from JAR" >&2
+      exit 1
+    }
+  fi
+  
+  echo "Extracted migrations to ${MIGRATE_DIR}:"
+  ls -la "${MIGRATE_DIR}"/*.sql
+  
+  # Run via MySQL client
+  parse_jdbc_url "${MYSQL_URL}"
+  
+  # Get current version
+  local current_version
+  current_version=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
+    -N -e "SELECT COALESCE(MAX(version), '0') FROM flyway_schema_history WHERE success = 1;" "${DB_NAME}" 2>/dev/null || echo "0")
+  
+  echo "Current migration version: ${current_version}"
+  
+  local FLYWAY_LOG="${APP_DIR}/flyway-migrate.log"
+  : > "${FLYWAY_LOG}"
+  
+  for sql_file in "${MIGRATE_DIR}"/V*.sql; do
+    [[ -f "${sql_file}" ]] || continue
+    
+    local filename=$(basename "${sql_file}")
+    local version=$(echo "${filename}" | sed -n 's/^V\([0-9]*\)__.*/\1/p')
+    
+    if [[ "${version}" -le "${current_version}" ]]; then
+      echo "Skipping ${filename} (already applied)"
+      continue
+    fi
+    
+    echo "Applying ${filename}..."
+    if ! mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
+      "${DB_NAME}" < "${sql_file}" >> "${FLYWAY_LOG}" 2>&1; then
+      echo "ERROR: Failed to apply ${filename}" >&2
+      echo "See ${FLYWAY_LOG} for details" >&2
+      tail -n 30 "${FLYWAY_LOG}" >&2
+      
+      # Record failure in flyway_schema_history
+      local description=$(echo "${filename}" | sed 's/^V[0-9]*__//; s/\.sql$//' | tr '_' ' ')
+      mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
+        -e "INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success) 
+            SELECT COALESCE(MAX(installed_rank), 0) + 1, '${version}', '${description}', 'SQL', '${filename}', 0, '${MYSQL_USER}', 0, 0 
+            FROM flyway_schema_history;" "${DB_NAME}" 2>/dev/null || true
+      exit 2
+    fi
+    
+    # Record success
+    local description=$(echo "${filename}" | sed 's/^V[0-9]*__//; s/\.sql$//' | tr '_' ' ')
+    mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
+      -e "INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success) 
+          SELECT COALESCE(MAX(installed_rank), 0) + 1, '${version}', '${description}', 'SQL', '${filename}', 0, '${MYSQL_USER}', 0, 1 
+          FROM flyway_schema_history;" "${DB_NAME}" 2>/dev/null || {
+      # Create table if needed
+      mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" "${DB_NAME}" << 'TABLESQL'
+CREATE TABLE IF NOT EXISTS flyway_schema_history (
+  installed_rank INT NOT NULL,
+  version VARCHAR(50),
+  description VARCHAR(200) NOT NULL,
+  type VARCHAR(20) NOT NULL,
+  script VARCHAR(1000) NOT NULL,
+  checksum INT,
+  installed_by VARCHAR(100) NOT NULL,
+  installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  execution_time INT NOT NULL,
+  success TINYINT(1) NOT NULL,
+  PRIMARY KEY (installed_rank)
+);
+TABLESQL
+      mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" \
+        -e "INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success) 
+            VALUES (1, '${version}', '${description}', 'SQL', '${filename}', 0, '${MYSQL_USER}', 0, 1);" "${DB_NAME}"
+    }
+    
+    echo "Applied ${filename} successfully"
+  done
+  
+  echo ""
   echo "Migration completed successfully"
   echo "Process exiting (migrate-only mode)"
   exit 0
@@ -293,7 +375,7 @@ case "${MODE}" in
   migrate-only)
     validate_db_config
     run_migration_only
-    # run_migration_only calls exit 0 on success
+    # run_migration_only calls exit, so we never reach here
     ;;
   
   start)

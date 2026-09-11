@@ -315,12 +315,23 @@ SELECT id, template_name FROM email_logs WHERE template_name IS NOT NULL;
 # 检查 Flyway 状态（失败则退出码 2）
 ./deploy/start-backend.sh --check-flyway
 
-# 仅运行迁移（不启动应用）
-./deploy/start-backend.sh --migrate-only
+# 仅运行迁移（不启动应用）- 两种方式
+./deploy/migrate.sh              # 独立脚本（推荐，无需 backend 源码）
+./deploy/start-backend.sh --migrate-only  # 会自动调用 migrate.sh
 
 # 正常启动（含迁移）
 ./deploy/start-backend.sh
 ```
+
+### migrate.sh 用法
+
+```bash
+./deploy/migrate.sh              # 运行迁移
+./deploy/migrate.sh --check      # 仅检查失败迁移
+./deploy/migrate.sh --info       # 显示迁移状态
+```
+
+**注意**：`migrate.sh` 从 JAR 提取迁移文件运行，不需要 backend 源码目录。
 
 ### SQL 快查
 

@@ -42,13 +42,15 @@ DEALLOCATE PREPARE stmt;
 -- If both tables have row with same ID, NEW table's row is preserved.
 -- This is intentional: JPA's canonical table (points_log) takes precedence.
 -- See runbook for manual verification before DROP.
+-- NOTE: Old table (points_logs) has column `balance`, new table has `balance_after`.
+--       We SELECT only from old table columns, mapping `balance` → `balance_after`.
 SET @sql = IF(@old_exists > 0 AND @new_exists > 0,
     'INSERT INTO points_log (id, user_id, change_type, delta, balance_after, related_id, created_at)
      SELECT id, user_id, change_type, delta, 
-            COALESCE(balance, balance_after, 0) AS balance_after,
+            COALESCE(balance, 0) AS balance_after,
             related_id, created_at
-     FROM points_logs old
-     WHERE NOT EXISTS (SELECT 1 FROM points_log new WHERE new.id = old.id)',
+     FROM points_logs
+     WHERE NOT EXISTS (SELECT 1 FROM points_log WHERE points_log.id = points_logs.id)',
     'SELECT ''points: no merge needed'' AS status');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
