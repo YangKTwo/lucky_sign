@@ -16,6 +16,7 @@ class ApiClient {
   String? _token;
   String? _refreshToken;
   int? _userId;
+  bool _isRefreshing = false;
 
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
@@ -109,30 +110,77 @@ class ApiClient {
     return h;
   }
 
-  Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body) async {
+  Future<bool> _tryRefreshToken() async {
+    if (_isRefreshing || _refreshToken == null || _refreshToken!.isEmpty) {
+      return false;
+    }
+    _isRefreshing = true;
+    try {
+      final res = await http.post(
+        Uri.parse('$apiBaseUrl/api/auth/refresh'),
+        headers: {'Content-Type': 'application/json; charset=utf-8'},
+        body: jsonEncode({'refreshToken': _refreshToken}),
+      );
+      if (res.statusCode == 200) {
+        final map = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        if (map['success'] == true) {
+          final data = map['data'] as Map<String, dynamic>?;
+          final newToken = data?['token'] as String?;
+          final newRefresh = data?['refreshToken'] as String?;
+          if (newToken != null && newToken.isNotEmpty) {
+            await saveToken(newToken, refreshToken: newRefresh);
+            return true;
+          }
+        }
+      }
+      await saveToken(null);
+      return false;
+    } catch (e) {
+      return false;
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body, {bool retry = true}) async {
     final res = await http.post(
       Uri.parse('$apiBaseUrl$path'),
       headers: _headers(),
       body: jsonEncode(body),
     );
+    if (res.statusCode == 401 && retry && !path.contains('/auth/')) {
+      if (await _tryRefreshToken()) {
+        return postJson(path, body, retry: false);
+      }
+    }
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> getJson(String path) async {
+  Future<Map<String, dynamic>> getJson(String path, {bool retry = true}) async {
     final res = await http.get(Uri.parse('$apiBaseUrl$path'), headers: _headers());
+    if (res.statusCode == 401 && retry && !path.contains('/auth/')) {
+      if (await _tryRefreshToken()) {
+        return getJson(path, retry: false);
+      }
+    }
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> putJson(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> putJson(String path, Map<String, dynamic> body, {bool retry = true}) async {
     final res = await http.put(
       Uri.parse('$apiBaseUrl$path'),
       headers: _headers(),
       body: jsonEncode(body),
     );
+    if (res.statusCode == 401 && retry && !path.contains('/auth/')) {
+      if (await _tryRefreshToken()) {
+        return putJson(path, body, retry: false);
+      }
+    }
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> completeCheckin({String? text, XFile? image}) async {
+  Future<Map<String, dynamic>> completeCheckin({String? text, XFile? image, bool retry = true}) async {
     final req = http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/api/checkin/complete'));
     if (_token != null) req.headers['Authorization'] = 'Bearer $_token';
     if (text != null && text.isNotEmpty) {
@@ -150,10 +198,15 @@ class ApiClient {
     }
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 401 && retry) {
+      if (await _tryRefreshToken()) {
+        return completeCheckin(text: text, image: image, retry: false);
+      }
+    }
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> uploadAvatar(XFile image) async {
+  Future<Map<String, dynamic>> uploadAvatar(XFile image, {bool retry = true}) async {
     final req = http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/api/user/avatar'));
     if (_token != null) req.headers['Authorization'] = 'Bearer $_token';
     final bytes = await image.readAsBytes();
@@ -166,6 +219,11 @@ class ApiClient {
     ));
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 401 && retry) {
+      if (await _tryRefreshToken()) {
+        return uploadAvatar(image, retry: false);
+      }
+    }
     return _decode(res);
   }
 

@@ -15,12 +15,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -110,6 +112,25 @@ class CheckinServiceRaceTest {
         verify(dailyDrawRepository).save(argThat(d -> d.getStatus() == DrawStatus.COMPLETED));
         verify(checkinRecordRepository).save(any(CheckinRecord.class));
         verify(userRepository).save(any(User.class));
+    }
+
+    @Test
+    void duplicateCheckinRecordThrowsDataIntegrityViolation() {
+        LocalDate today = LocalDate.now();
+        User user = createTestUser(1L);
+        user.setLastCheckinDate(today.minusDays(1));
+        DailyDraw draw = createTestDraw(1L, 1L, today, DrawStatus.VIEWED);
+
+        when(drawService.today()).thenReturn(today);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(drawService.ensureDraw(1L, today)).thenReturn(draw);
+        when(drawService.rewardPoints(draw)).thenReturn(10);
+        when(titleService.resolve(anyInt())).thenReturn("签到达人");
+        when(checkinRecordRepository.save(any(CheckinRecord.class)))
+                .thenThrow(new DataIntegrityViolationException("Duplicate entry for key 'uk_user_checkin_date'"));
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> checkinService.complete(1L, "完成任务", null));
     }
 
     private User createTestUser(Long id) {

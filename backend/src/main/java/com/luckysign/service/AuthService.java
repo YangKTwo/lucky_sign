@@ -76,6 +76,7 @@ public class AuthService {
         user.setEnabled(true);
         user = userRepository.save(user);
 
+        boolean membershipCreated = false;
         try {
             if (!circleMemberRepository.existsByCircleIdAndUserId(circle.getId(), user.getId())) {
                 int updated = circleRepository.incrementMemberCount(circle.getId());
@@ -87,9 +88,19 @@ public class AuthService {
                 member.setUserId(user.getId());
                 member.setRole(MemberRole.MEMBER);
                 circleMemberRepository.save(member);
+                membershipCreated = true;
+            } else {
+                membershipCreated = true;
             }
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             circleRepository.decrementMemberCount(circle.getId());
+            if (circleMemberRepository.existsByCircleIdAndUserId(circle.getId(), user.getId())) {
+                membershipCreated = true;
+            }
+        }
+
+        if (!membershipCreated) {
+            throw new BizException("加入圈子失败，请稍后重试");
         }
 
         return generateAuthResponse(user);

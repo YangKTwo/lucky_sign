@@ -25,7 +25,7 @@ public class AssistantEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onAssistantRequested(AssistantRequestedEvent event) {
         try {
-            String reply = aiAssistantService.ask(event.nickname(), event.question());
+            String reply = aiAssistantService.ask(event.userId(), event.nickname(), event.question());
             chatService.updateAssistant(event.messageId(), reply);
         } catch (Exception e) {
             log.warn("assistant reply failed: {}", e.getMessage());

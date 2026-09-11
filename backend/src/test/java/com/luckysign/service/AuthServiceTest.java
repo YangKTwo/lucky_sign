@@ -101,6 +101,7 @@ class AuthServiceTest {
         when(passwordEncoder.encode("12345678")).thenReturn("hash");
         when(userRepository.save(any(User.class))).thenReturn(saved);
         when(circleMemberRepository.existsByCircleIdAndUserId(1L, 9L)).thenReturn(false);
+        when(circleRepository.incrementMemberCount(1L)).thenReturn(1);
         when(jwtService.generateAccessToken(eq(9L), eq("a@b.com"), eq(0L))).thenReturn("access-token");
         when(jwtService.generateRefreshToken(eq(9L), eq(0L))).thenReturn("refresh-token");
 
@@ -112,7 +113,7 @@ class AuthServiceTest {
         ArgumentCaptor<CircleMember> member = ArgumentCaptor.forClass(CircleMember.class);
         verify(circleMemberRepository).save(member.capture());
         assertEquals(MemberRole.MEMBER, member.getValue().getRole());
-        assertEquals(4, circle.getMemberCount());
+        verify(circleRepository).incrementMemberCount(1L);
     }
 
     @Test
