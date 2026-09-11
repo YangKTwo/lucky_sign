@@ -38,7 +38,7 @@ jobs:
             echo "DEPLOY_HOST secret is empty" >&2
             exit 1
           fi
-          WEB_URL="http://${DEPLOY_HOST}:8080/app/"
+          WEB_URL="http://${DEPLOY_HOST}/app/"
           echo "web_url=${WEB_URL}" >> "$GITHUB_OUTPUT"
           mkdir -p dist
           printf '%s\n' "$WEB_URL" > dist/web-latest.txt

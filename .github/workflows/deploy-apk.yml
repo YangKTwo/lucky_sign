@@ -84,7 +84,7 @@ jobs:
           cp "$SRC" "dist/downloads/lucky-sign-latest.apk"
           SIZE=$(stat -c%s "dist/downloads/${APK_FILE}")
           UPDATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          BASE="http://${DEPLOY_HOST}:8080/downloads"
+          BASE="http://${DEPLOY_HOST}/downloads"
           URL="${BASE}/${APK_FILE}"
           LATEST_ALIAS="${BASE}/lucky-sign-latest.apk"
           PAGE="${BASE}/index.html"
