@@ -111,7 +111,8 @@ jobs:
           <body style="font-family:sans-serif;max-width:480px;margin:48px auto;padding:0 16px;line-height:1.6">
             <h1>今日幸运签</h1>
             <p>当前版本 <strong>${VERSION_NAME} (build ${BUILD_NUMBER})</strong></p>
-            <p><a href="./${APK_FILE}">下载本版本 APK</a></p>
+            <p><a href="./${APK_FILE}">下载本版本 APK（安卓）</a></p>
+            <p><a href="/app/">网页版（iPhone / 浏览器）</a></p>
             <p style="font-size:13px;word-break:break-all;background:#f6f6f6;padding:10px 12px;border-radius:8px">${URL}</p>
             <p style="color:#666;font-size:13px">更新时间（UTC）：${UPDATED}</p>
             <p style="color:#888;font-size:12px">历史包保留在同目录；也可看 <a href="./latest.txt">latest.txt</a> / <a href="./latest.json">latest.json</a></p>

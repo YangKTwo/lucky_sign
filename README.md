@@ -43,15 +43,23 @@ flutter run -d emulator-5554
 
 推送到 `main` 且改动了 `backend/**`（或手动 Run workflow）时，会自动构建 JAR、上传到服务器并重启。
 
-推送到 `main` 且改动了 `mobile/**` 时，会自动打安卓 APK：
+推送到 `main` 且改动了 `mobile/**` 时，会自动：
 
-- 文件名带版本：`lucky-sign-<version>-<build>.apk`（build 取 GitHub run number）
-- 每次构建会在服务器写入：
-  - `downloads/latest.txt` — **一行纯文本下载链接，直接复制**
-  - `downloads/latest.json` — 含版本、体积、时间
-  - `downloads/index.html` — 下载页
-- Actions run 的 **Summary** 里也会打印同一链接
-- 另有别名 `lucky-sign-latest.apk`（始终指向最新包）；历史版本包会保留在同目录
+1. **安卓 APK**
+   - 文件名带版本：`lucky-sign-<version>-<build>.apk`（build 取 GitHub run number）
+   - `downloads/latest.txt` — APK 链接一行文本，方便复制
+   - `downloads/latest.json` / `index.html` 下载页
+   - Actions Summary 也会打印链接
+   - 另有别名 `lucky-sign-latest.apk`；历史版本包保留
+
+2. **网页版（给 iPhone / 浏览器）**
+   - 构建产物同步到服务器 `webapp/`，对外地址：`http://<主机>:8080/app/`
+   - `downloads/web-latest.txt` — 网页链接一行文本
+   - 与 APK **同一后端、同一账号数据**
+   - Safari 可「分享 → 添加到主屏幕」
+
+也可在 Actions 里手动跑 **Publish APK** / **Publish Web**。
+
 
 ### 1. GitHub Secrets
 
@@ -117,12 +125,13 @@ chmod 600 /www/wwwroot/lucky-api/run.env
 
 ### 3. 手动触发
 
-GitHub → Actions → **Deploy backend** 或 **Publish APK** → Run workflow。
+GitHub → Actions → **Deploy backend** / **Publish APK** / **Publish Web** → Run workflow。
 
 工作流：
 
 - 后端：[`.github/workflows/deploy-backend.yml`](.github/workflows/deploy-backend.yml)
 - APK：[`.github/workflows/deploy-apk.yml`](.github/workflows/deploy-apk.yml)
+- Web：[`.github/workflows/deploy-web.yml`](.github/workflows/deploy-web.yml)
 - 重启脚本：[`deploy/start-backend.sh`](deploy/start-backend.sh)
 
 ## 说明

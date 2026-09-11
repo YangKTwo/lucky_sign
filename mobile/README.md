@@ -28,8 +28,26 @@ flutter create . --project-name lucky_sign --org com.luckysign
 flutter pub get
 ```
 
+## 网页版（iPhone / 浏览器）
+
+与安卓共用 `lib/` 代码，构建后挂在后端 `/app/`：
+
+```powershell
+cd mobile
+flutter pub get
+# 本地 Chrome 调试（需指定后端，因为浏览器源是 localhost）
+flutter run -d chrome --dart-define=API_BASE=http://127.0.0.1:8080 --dart-define=WS_BASE=ws://127.0.0.1:8080/ws
+
+# 生产构建（同源部署，不要写死 API）
+flutter build web --release --base-href=/app/
+```
+
+部署后打开：`http://<服务器>:8080/app/`  
+Safari → 分享 → **添加到主屏幕**，即可像轻量 App 使用。账号与安卓 APK 数据互通。
+
 ## 连接后端
-- 默认连云端（见 `lib/config.dart`）
+- **原生 App 默认**连云端（见 `lib/config.dart`）
+- **Web 未指定 dart-define 时**自动用当前页面同源
 - 模拟器本机后端：`--dart-define=API_BASE=http://10.0.2.2:8080 --dart-define=WS_BASE=ws://10.0.2.2:8080/ws`
 - 真机局域网示例：
 
@@ -38,12 +56,11 @@ flutter run --dart-define=API_BASE=http://192.168.1.8:8080 --dart-define=WS_BASE
 ```
 
 ## 运行
-先启动后端，再（选安卓模拟器或 Chrome，不要选 Windows）：
+先启动后端，再选设备：
 
 ```powershell
-flutter run -d emulator-5554
-# 或
-flutter run -d chrome
+flutter run -d emulator-5554   # 安卓
+flutter run -d chrome          # 网页（记得 dart-define 指向后端）
 ```
 
-工程只保留 Android / iOS / Web，已去掉 Windows / Linux / macOS 桌面端。
+工程保留 Android / iOS / Web。
