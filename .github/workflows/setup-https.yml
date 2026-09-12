@@ -309,18 +309,75 @@ jobs:
             sudo mkdir -p /var/www/certbot
             sudo chown -R "$(whoami)":"$(whoami)" /www/wwwroot/lucky-api 2>/dev/null || true
             
-            # Create nginx config
-            NGINX_CONF="/etc/nginx/sites-available/lucky-sign.conf"
-            NGINX_ENABLED="/etc/nginx/sites-enabled/lucky-sign.conf"
+            # Detect nginx configuration paths
+            echo "Detecting nginx configuration..."
+            NGINX_MAIN_CONF=""
+            NGINX_VHOST_DIR=""
             
-            # Fallback for RHEL-based systems without sites-available
-            if [[ ! -d /etc/nginx/sites-available ]]; then
-              sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-              # Ensure sites-enabled is included in nginx.conf
-              if ! grep -q 'sites-enabled' /etc/nginx/nginx.conf; then
-                sudo sed -i '/http {/a \    include /etc/nginx/sites-enabled/*.conf;' /etc/nginx/nginx.conf
+            # Try to get config path from nginx -t
+            NGINX_TEST_OUTPUT=$(sudo nginx -t 2>&1 || true)
+            echo "nginx -t output: $NGINX_TEST_OUTPUT"
+            
+            # Extract main config path from nginx -t output
+            DETECTED_CONF=$(echo "$NGINX_TEST_OUTPUT" | grep -oE '/[^ ]+nginx\.conf' | head -1 || true)
+            
+            # Check common nginx config locations
+            for CONF_PATH in \
+              "$DETECTED_CONF" \
+              "/etc/nginx/nginx.conf" \
+              "/www/server/nginx/conf/nginx.conf" \
+              "/usr/local/nginx/conf/nginx.conf" \
+              "/opt/nginx/conf/nginx.conf"; do
+              if [[ -n "$CONF_PATH" ]] && [[ -f "$CONF_PATH" ]]; then
+                NGINX_MAIN_CONF="$CONF_PATH"
+                break
+              fi
+            done
+            
+            if [[ -z "$NGINX_MAIN_CONF" ]]; then
+              echo "WARNING: Could not find nginx.conf, will try common vhost directories"
+            else
+              echo "Found nginx config: $NGINX_MAIN_CONF"
+            fi
+            
+            # Detect vhost directory - check BT Panel first, then standard locations
+            for VHOST_PATH in \
+              "/www/server/panel/vhost/nginx" \
+              "/www/server/nginx/conf/vhost" \
+              "/etc/nginx/sites-available" \
+              "/etc/nginx/conf.d"; do
+              if [[ -d "$VHOST_PATH" ]]; then
+                NGINX_VHOST_DIR="$VHOST_PATH"
+                echo "Found vhost directory: $NGINX_VHOST_DIR"
+                break
+              fi
+            done
+            
+            # If no vhost dir found, create one based on detected main conf
+            if [[ -z "$NGINX_VHOST_DIR" ]]; then
+              if [[ "$NGINX_MAIN_CONF" == "/www/server/nginx/conf/nginx.conf" ]]; then
+                NGINX_VHOST_DIR="/www/server/nginx/conf/vhost"
+              elif [[ -n "$NGINX_MAIN_CONF" ]]; then
+                NGINX_VHOST_DIR="$(dirname "$NGINX_MAIN_CONF")/conf.d"
+              else
+                NGINX_VHOST_DIR="/etc/nginx/conf.d"
+              fi
+              echo "Creating vhost directory: $NGINX_VHOST_DIR"
+              sudo mkdir -p "$NGINX_VHOST_DIR"
+              
+              # Try to add include to main conf if it exists and doesn't already include this dir
+              if [[ -f "$NGINX_MAIN_CONF" ]]; then
+                if ! grep -q "$NGINX_VHOST_DIR" "$NGINX_MAIN_CONF" 2>/dev/null; then
+                  echo "Adding include directive to $NGINX_MAIN_CONF"
+                  sudo sed -i "/http *{/a\\    include $NGINX_VHOST_DIR/*.conf;" "$NGINX_MAIN_CONF" 2>/dev/null || \
+                    echo "WARNING: Could not add include directive, config may need manual adjustment"
+                fi
               fi
             fi
+            
+            # Set config file path
+            NGINX_CONF="$NGINX_VHOST_DIR/lucky-sign.conf"
+            echo "Will write nginx config to: $NGINX_CONF"
             
             # Check if certificate already exists
             CERT_EXISTS=false
@@ -350,16 +407,38 @@ jobs:
             HTTPCONF
               sudo sed -i "s/DOMAIN_PLACEHOLDER/${DOMAIN}/g" "$NGINX_CONF"
               
-              # Enable site and reload nginx
-              sudo ln -sf "$NGINX_CONF" "$NGINX_ENABLED" 2>/dev/null || true
-              
-              # Remove default site if it conflicts
-              sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+              # For sites-available pattern, create symlink to sites-enabled
+              if [[ "$NGINX_VHOST_DIR" == */sites-available ]]; then
+                NGINX_ENABLED="${NGINX_VHOST_DIR/sites-available/sites-enabled}/lucky-sign.conf"
+                sudo mkdir -p "$(dirname "$NGINX_ENABLED")"
+                sudo ln -sf "$NGINX_CONF" "$NGINX_ENABLED" 2>/dev/null || true
+                # Remove default site if it conflicts
+                sudo rm -f "$(dirname "$NGINX_ENABLED")/default" 2>/dev/null || true
+              fi
               
               echo "Testing nginx configuration..."
-              sudo nginx -t
+              if ! sudo nginx -t; then
+                echo "ERROR: nginx config test failed"
+                echo "Config file contents:"
+                sudo cat "$NGINX_CONF"
+                exit 1
+              fi
+              
+              # Reload nginx - try multiple methods
+              echo "Reloading nginx..."
               sudo systemctl enable nginx 2>/dev/null || true
-              sudo systemctl reload nginx || sudo systemctl start nginx
+              if sudo systemctl reload nginx 2>/dev/null; then
+                echo "nginx reloaded via systemctl"
+              elif sudo nginx -s reload 2>/dev/null; then
+                echo "nginx reloaded via nginx -s reload"
+              elif sudo /etc/init.d/nginx reload 2>/dev/null; then
+                echo "nginx reloaded via init.d"
+              elif sudo systemctl start nginx 2>/dev/null; then
+                echo "nginx started via systemctl"
+              else
+                echo "WARNING: Could not reload nginx, trying restart"
+                sudo systemctl restart nginx 2>/dev/null || sudo nginx 2>/dev/null || true
+              fi
               
               # Verify ACME challenge path is accessible locally before certbot
               echo "Verifying ACME challenge path locally..."
@@ -539,14 +618,23 @@ jobs:
             # Replace domain placeholder
             sudo sed -i "s/DOMAIN_PLACEHOLDER/${DOMAIN}/g" "$NGINX_CONF"
             
-            # Enable site
-            sudo ln -sf "$NGINX_CONF" "$NGINX_ENABLED" 2>/dev/null || true
+            # For sites-available pattern, ensure symlink exists
+            if [[ "$NGINX_VHOST_DIR" == */sites-available ]]; then
+              NGINX_ENABLED="${NGINX_VHOST_DIR/sites-available/sites-enabled}/lucky-sign.conf"
+              sudo ln -sf "$NGINX_CONF" "$NGINX_ENABLED" 2>/dev/null || true
+            fi
             
             # Test and reload nginx
             echo "Testing nginx configuration..."
-            sudo nginx -t
+            if ! sudo nginx -t; then
+              echo "ERROR: nginx config test failed after HTTPS setup"
+              exit 1
+            fi
             echo "Reloading nginx..."
-            sudo systemctl reload nginx
+            sudo systemctl reload nginx 2>/dev/null || \
+              sudo nginx -s reload 2>/dev/null || \
+              sudo /etc/init.d/nginx reload 2>/dev/null || \
+              sudo systemctl restart nginx 2>/dev/null || true
             
             # Ensure certbot renewal timer/cron exists
             echo "Setting up certificate auto-renewal..."
