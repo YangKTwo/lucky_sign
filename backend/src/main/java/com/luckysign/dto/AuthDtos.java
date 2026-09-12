@@ -19,9 +19,12 @@ public class AuthDtos {
     ) {
     }
 
-    public record AuthResponse(String token, String refreshToken, UserProfileResponse profile) {
-        public AuthResponse(String token, UserProfileResponse profile) {
-            this(token, null, profile);
+    public record AuthResponse(String token, String refreshToken, UserProfileResponse profile, Long circleId) {
+        public AuthResponse(String token, UserProfileResponse profile, Long circleId) {
+            this(token, null, profile, circleId);
+        }
+        public AuthResponse(String token, String refreshToken, UserProfileResponse profile) {
+            this(token, refreshToken, profile, null);
         }
     }
 

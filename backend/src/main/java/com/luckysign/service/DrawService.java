@@ -12,7 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 @Service
 public class DrawService {
@@ -21,6 +23,7 @@ public class DrawService {
     private final TaskItemRepository taskItemRepository;
     private final FortuneCopyRepository fortuneCopyRepository;
     private final CircleRepository circleRepository;
+    private final CircleMemberRepository circleMemberRepository;
     private final CircleDailyStarRepository circleDailyStarRepository;
     private final ZoneId zoneId = ZoneId.of("Asia/Shanghai");
 
@@ -29,12 +32,14 @@ public class DrawService {
                        TaskItemRepository taskItemRepository,
                        FortuneCopyRepository fortuneCopyRepository,
                        CircleRepository circleRepository,
+                       CircleMemberRepository circleMemberRepository,
                        CircleDailyStarRepository circleDailyStarRepository) {
         this.userRepository = userRepository;
         this.dailyDrawRepository = dailyDrawRepository;
         this.taskItemRepository = taskItemRepository;
         this.fortuneCopyRepository = fortuneCopyRepository;
         this.circleRepository = circleRepository;
+        this.circleMemberRepository = circleMemberRepository;
         this.circleDailyStarRepository = circleDailyStarRepository;
     }
 
@@ -43,23 +48,28 @@ public class DrawService {
     }
 
     @Transactional
-    public void generateForAllActiveUsers() {
+    public void generateForAllActiveUsers(Long circleId) {
         LocalDate date = today();
-        ensureLuckyStar(date);
-        List<User> users = userRepository.findByTagNot(UserTag.DORMANT);
+        ensureLuckyStar(circleId, date);
+        Set<Long> memberUserIds = circleMemberRepository.findByCircleId(circleId).stream()
+                .map(CircleMember::getUserId)
+                .collect(Collectors.toSet());
+        List<User> users = userRepository.findByTagNot(UserTag.DORMANT).stream()
+                .filter(u -> memberUserIds.contains(u.getId()))
+                .toList();
         for (User user : users) {
-            ensureDraw(user.getId(), date);
+            ensureDraw(circleId, user.getId(), date);
         }
     }
 
     @Transactional
-    public DailyDraw ensureDraw(Long userId, LocalDate date) {
-        ensureLuckyStar(date);
+    public DailyDraw ensureDraw(Long circleId, Long userId, LocalDate date) {
+        ensureLuckyStar(circleId, date);
         return dailyDrawRepository.findByUserIdAndDrawDate(userId, date)
-                .orElseGet(() -> createDraw(userId, date));
+                .orElseGet(() -> createDraw(circleId, userId, date));
     }
 
-    private DailyDraw createDraw(Long userId, LocalDate date) {
+    private DailyDraw createDraw(Long circleId, Long userId, LocalDate date) {
         User user = userRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
         if (user.getTag() == UserTag.DORMANT) {
             throw new BizException("账号已休眠，请联系管理员解锁");
@@ -68,7 +78,7 @@ public class DrawService {
         FortuneLevel level = randomLevel();
         String fortuneText = pickFortuneText(level);
         TaskItem task = pickTask(level, userId, date);
-        boolean lucky = isLuckyStar(userId, date);
+        boolean lucky = isLuckyStar(circleId, userId, date);
 
         DailyDraw draw = new DailyDraw();
         draw.setUserId(userId);
@@ -84,27 +94,29 @@ public class DrawService {
     }
 
     @Transactional
-    public void ensureLuckyStar(LocalDate date) {
-        Circle circle = circleRepository.findFirstByOrderByIdAsc()
-                .orElseThrow(() -> new BizException("默认圈子未初始化"));
-        if (circleDailyStarRepository.findByCircleIdAndStarDate(circle.getId(), date).isPresent()) {
+    public void ensureLuckyStar(Long circleId, LocalDate date) {
+        if (circleDailyStarRepository.findByCircleIdAndStarDate(circleId, date).isPresent()) {
             return;
         }
-        List<User> candidates = userRepository.findByTagNot(UserTag.DORMANT);
+        Set<Long> memberUserIds = circleMemberRepository.findByCircleId(circleId).stream()
+                .map(CircleMember::getUserId)
+                .collect(Collectors.toSet());
+        List<User> candidates = userRepository.findByTagNot(UserTag.DORMANT).stream()
+                .filter(u -> memberUserIds.contains(u.getId()))
+                .toList();
         if (candidates.isEmpty()) {
             return;
         }
         User picked = candidates.get(ThreadLocalRandom.current().nextInt(candidates.size()));
         CircleDailyStar star = new CircleDailyStar();
-        star.setCircleId(circle.getId());
+        star.setCircleId(circleId);
         star.setUserId(picked.getId());
         star.setStarDate(date);
         circleDailyStarRepository.save(star);
     }
 
-    private boolean isLuckyStar(Long userId, LocalDate date) {
-        return circleRepository.findFirstByOrderByIdAsc()
-                .flatMap(c -> circleDailyStarRepository.findByCircleIdAndStarDate(c.getId(), date))
+    private boolean isLuckyStar(Long circleId, Long userId, LocalDate date) {
+        return circleDailyStarRepository.findByCircleIdAndStarDate(circleId, date)
                 .map(s -> s.getUserId().equals(userId))
                 .orElse(false);
     }

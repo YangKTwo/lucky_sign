@@ -43,7 +43,7 @@ public class RatingService {
     }
 
     @Transactional
-    public RatingDtos.RatingSummary rate(Long raterUserId, Long checkinId, Integer score) {
+    public RatingDtos.RatingSummary rate(Long circleId, Long raterUserId, Long checkinId, Integer score) {
         if (score == null || score < 1 || score > 5) {
             throw new BizException("请选择 1-5 分");
         }
@@ -59,14 +59,14 @@ public class RatingService {
         rating.setRaterUserId(raterUserId);
         rating.setScore(score);
         checkinRatingRepository.save(rating);
-        return summary(checkinId, raterUserId);
+        return summary(circleId, checkinId, raterUserId);
     }
 
-    public RatingDtos.CheckinDetail detail(Long checkinId, Long viewerUserId) {
+    public RatingDtos.CheckinDetail detail(Long circleId, Long checkinId, Long viewerUserId) {
         CheckinRecord record = checkinRecordRepository.findById(checkinId)
                 .orElseThrow(() -> new BizException("打卡记录不存在"));
         User user = userRepository.findById(record.getUserId()).orElse(null);
-        RatingDtos.RatingSummary rating = summary(checkinId, viewerUserId);
+        RatingDtos.RatingSummary rating = summary(circleId, checkinId, viewerUserId);
         return new RatingDtos.CheckinDetail(
                 record.getId(),
                 record.getUserId(),
@@ -82,16 +82,16 @@ public class RatingService {
         );
     }
 
-    public RatingDtos.RatingSummary summary(Long checkinId, Long viewerUserId) {
+    public RatingDtos.RatingSummary summary(Long circleId, Long checkinId, Long viewerUserId) {
         List<CheckinRating> list = checkinRatingRepository.findByCheckinId(checkinId);
-        return toSummary(checkinId, list, viewerUserId, expectedRaterCount());
+        return toSummary(checkinId, list, viewerUserId, expectedRaterCount(circleId));
     }
 
-    public Map<Long, RatingDtos.RatingSummary> summaries(Collection<Long> checkinIds, Long viewerUserId) {
+    public Map<Long, RatingDtos.RatingSummary> summaries(Long circleId, Collection<Long> checkinIds, Long viewerUserId) {
         if (checkinIds == null || checkinIds.isEmpty()) {
             return new HashMap<>();
         }
-        int expected = expectedRaterCount();
+        int expected = expectedRaterCount(circleId);
         Map<Long, List<CheckinRating>> grouped = checkinRatingRepository.findByCheckinIdIn(checkinIds).stream()
                 .collect(Collectors.groupingBy(CheckinRating::getCheckinId));
         Map<Long, RatingDtos.RatingSummary> map = new HashMap<>();
@@ -101,12 +101,8 @@ public class RatingService {
         return map;
     }
 
-    /**
-     * 仅统计「全员评完」的打卡均分，再按用户求平均。
-     * 综合分 = 任务积分 + 该均分 × 2。
-     */
-    public Map<Long, Double> finalizedAvgScoreByUser() {
-        int expected = expectedRaterCount();
+    public Map<Long, Double> finalizedAvgScoreByUser(Long circleId) {
+        int expected = expectedRaterCount(circleId);
         if (expected <= 0) {
             return Map.of();
         }
@@ -131,12 +127,11 @@ public class RatingService {
         return result;
     }
 
-    public int expectedRaterCount() {
-        Circle circle = circleRepository.findFirstByOrderByIdAsc().orElse(null);
-        if (circle == null) {
+    public int expectedRaterCount(Long circleId) {
+        if (circleId == null) {
             return 0;
         }
-        int members = circleMemberRepository.findByCircleId(circle.getId()).size();
+        int members = circleMemberRepository.findByCircleId(circleId).size();
         return Math.max(0, members - 1);
     }
 

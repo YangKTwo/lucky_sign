@@ -120,6 +120,8 @@ flutter build web --release --base-href=/app/
 |------|------|------|
 | `MYSQL_PASSWORD` | 非空 | MySQL 密码 |
 | `JWT_SECRET` | **≥32 字符** | 用于签发 JWT token；必须是安全随机字符串 |
+| `CORS_ORIGINS` | **HTTPS 域名** | 生产环境必须设置，如 `https://119-23-45-226.sslip.io` |
+| `CORS_PRODUCTION` | `true` | 启用 CORS 严格模式，缺失 CORS_ORIGINS 时 fail-fast |
 
 **生成安全 JWT_SECRET 示例：**
 ```bash
@@ -144,6 +146,12 @@ MYSQL_PASSWORD=<your-mysql-password>
 JWT_SECRET=<at-least-32-char-random-secret>
 ADMIN_PASSWORD=<your-admin-password>
 
+# ---- 生产 CORS（必需！）----
+# 设置前端域名，如 https://119-23-45-226.sslip.io
+# 多个域名用逗号分隔；不允许 * 通配符
+CORS_ORIGINS=https://your-domain.example
+CORS_PRODUCTION=true
+
 # ---- 阿里云 OSS（图片/头像）----
 OSS_ENABLED=true
 OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com
@@ -161,8 +169,6 @@ AI_MODEL=qwen-plus
 # 可选：
 # AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 # AI_MENTION=@助手
-# 生产环境 CORS 应明确列出允许的 https 域名
-CORS_ORIGINS=https://your-domain.example
 EOF
 chmod 600 /www/wwwroot/lucky-api/run.env
 ```
@@ -176,7 +182,7 @@ chmod 600 /www/wwwroot/lucky-api/run.env
 | MySQL / JWT / 管理员 | 服务器 `run.env` | `MYSQL_*` / `JWT_SECRET` / `ADMIN_PASSWORD` |
 | OSS | 同上，或 `application.yml` 的 `app.oss` | `OSS_ENABLED` / `OSS_ENDPOINT` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_BUCKET` |
 | 千问 | 同上 `app.ai` | `AI_ENABLED` / `AI_API_KEY` / `AI_MODEL` |
-| CORS | 服务器 `run.env` | `CORS_ORIGINS`（生产应明确列出 https 域名，如 `https://app.example.com`） |
+| CORS | 服务器 `run.env` | `CORS_ORIGINS` + `CORS_PRODUCTION=true`（生产必须显式设置 HTTPS 域名，不允许通配符） |
 
 社区里发送带 `@助手` 的消息即可触发回复（需 `AI_ENABLED=true` 且填了 Key）。
 

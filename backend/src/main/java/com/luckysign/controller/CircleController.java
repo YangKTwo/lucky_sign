@@ -7,6 +7,7 @@ import com.luckysign.security.CircleAccessGuard;
 import com.luckysign.service.CircleService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -21,16 +22,16 @@ public class CircleController {
     }
 
     @GetMapping("/members")
-    public ApiResponse<CircleDtos.MembersResponse> members() {
+    public ApiResponse<CircleDtos.MembersResponse> members(@RequestParam(required = false) Long circleId) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(circleService.mentionCandidates(userId));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(circleService.mentionCandidates(resolvedCircleId, userId));
     }
 
     @GetMapping("/me")
-    public ApiResponse<CircleDtos.CircleMeResponse> me() {
+    public ApiResponse<CircleDtos.CircleMeResponse> me(@RequestParam(required = false) Long circleId) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(circleService.me(userId));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(circleService.me(resolvedCircleId, userId));
     }
 }

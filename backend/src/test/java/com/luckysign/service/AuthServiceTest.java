@@ -109,6 +109,7 @@ class AuthServiceTest {
         AuthDtos.AuthResponse res = authService.register(req);
         assertEquals("access-token", res.token());
         assertEquals("refresh-token", res.refreshToken());
+        assertEquals(1L, res.circleId());
 
         ArgumentCaptor<CircleMember> member = ArgumentCaptor.forClass(CircleMember.class);
         verify(circleMemberRepository).save(member.capture());
@@ -147,6 +148,7 @@ class AuthServiceTest {
         when(passwordEncoder.matches("oldpass1", "hash")).thenReturn(true);
         when(passwordEncoder.encode("newpass12")).thenReturn("newhash");
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(circleMemberRepository.findFirstCircleIdByUserId(1L)).thenReturn(Optional.of(2L));
         when(jwtService.generateAccessToken(eq(1L), eq("a@b.com"), eq(6L))).thenReturn("new-access");
         when(jwtService.generateRefreshToken(eq(1L), eq(6L))).thenReturn("new-refresh");
 
@@ -158,6 +160,7 @@ class AuthServiceTest {
         assertEquals("newhash", userCaptor.getValue().getPasswordHash());
         assertEquals("new-access", response.token());
         assertEquals("new-refresh", response.refreshToken());
+        assertEquals(2L, response.circleId());
     }
 
     @Test

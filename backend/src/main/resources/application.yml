@@ -57,8 +57,12 @@ app:
     access-token-minutes: ${JWT_ACCESS_MINUTES:30}
     refresh-token-days: ${JWT_REFRESH_DAYS:30}
   cors:
-    # 逗号分隔；原生 App 不依赖 CORS。Web 调试可设为 http://localhost:* 或具体域名
-    allowed-origins: ${CORS_ORIGINS:*}
+    # PRODUCTION REQUIRED: Set CORS_ORIGINS to your frontend domain(s), e.g. https://119-23-45-226.sslip.io
+    # Wildcard '*' is stripped and will cause fail-fast in production mode.
+    # Empty value in development falls back to localhost patterns.
+    allowed-origins: ${CORS_ORIGINS:}
+    # Set to true in production to enforce explicit CORS_ORIGINS (fail-fast if missing)
+    production: ${CORS_PRODUCTION:false}
   upload:
     dir: ./uploads
   download:

@@ -6,6 +6,8 @@
 #
 #   MYSQL_PASSWORD=<数据库密码>      # 必需，不能为空
 #   JWT_SECRET=<安全随机字符串>      # 必需，至少 32 字符
+#   CORS_ORIGINS=https://your-domain.example  # 生产必需，前端域名（逗号分隔多个）
+#   CORS_PRODUCTION=true            # 生产必需，启用 CORS 严格模式（缺失时 fail-fast）
 #
 # 可选变量：
 #   MYSQL_USER        默认 root
@@ -92,6 +94,22 @@ validate_full_config() {
   if [[ ${#JWT_SECRET} -lt 32 ]]; then
     echo "ERROR: JWT_SECRET must be at least 32 characters (current: ${#JWT_SECRET})" >&2
     exit 1
+  fi
+
+  # k2 #1: CORS validation for production
+  CORS_PRODUCTION="${CORS_PRODUCTION:-false}"
+  CORS_ORIGINS="${CORS_ORIGINS:-}"
+  if [[ "${CORS_PRODUCTION}" == "true" ]]; then
+    if [[ -z "${CORS_ORIGINS}" || "${CORS_ORIGINS}" == "*" ]]; then
+      echo "ERROR: CORS_ORIGINS must be explicitly set in production mode." >&2
+      echo "Set CORS_ORIGINS to your frontend domain(s), e.g. https://119-23-45-226.sslip.io" >&2
+      echo "Wildcard '*' is not allowed in production." >&2
+      exit 1
+    fi
+    if [[ ! "${CORS_ORIGINS}" =~ ^https:// ]]; then
+      echo "WARNING: CORS_ORIGINS should use HTTPS in production: ${CORS_ORIGINS}" >&2
+    fi
+    echo "Production CORS configured: ${CORS_ORIGINS}"
   fi
 
   if [[ ! -f "${JAR_PATH}" ]]; then

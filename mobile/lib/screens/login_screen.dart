@@ -86,6 +86,12 @@ class _LoginScreenState extends State<LoginScreen> {
       } else if (id is num) {
         await ApiClient.instance.saveUserId(id.toInt());
       }
+      final circleId = data['circleId'];
+      if (circleId is int) {
+        await ApiClient.instance.saveCircleId(circleId);
+      } else if (circleId is num) {
+        await ApiClient.instance.saveCircleId(circleId.toInt());
+      }
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const HomeShell()),

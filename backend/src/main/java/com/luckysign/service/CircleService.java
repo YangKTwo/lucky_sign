@@ -31,10 +31,8 @@ public class CircleService {
         this.userRepository = userRepository;
     }
 
-    public CircleDtos.MembersResponse mentionCandidates(Long viewerUserId) {
-        Circle circle = circleRepository.findFirstByOrderByIdAsc()
-                .orElseThrow(() -> new BizException("默认圈子未初始化"));
-        List<CircleMember> members = circleMemberRepository.findByCircleId(circle.getId());
+    public CircleDtos.MembersResponse mentionCandidates(Long circleId, Long viewerUserId) {
+        List<CircleMember> members = circleMemberRepository.findByCircleId(circleId);
         Map<Long, User> users = userRepository.findAllById(members.stream().map(CircleMember::getUserId).toList())
                 .stream()
                 .collect(Collectors.toMap(User::getId, Function.identity()));
@@ -57,9 +55,9 @@ public class CircleService {
         return new CircleDtos.MembersResponse(list);
     }
 
-    public CircleDtos.CircleMeResponse me(Long userId) {
-        Circle circle = circleRepository.findFirstByOrderByIdAsc()
-                .orElseThrow(() -> new BizException("默认圈子未初始化"));
+    public CircleDtos.CircleMeResponse me(Long circleId, Long userId) {
+        Circle circle = circleRepository.findById(circleId)
+                .orElseThrow(() -> new BizException("圈子不存在"));
         if (userId == null || !circleMemberRepository.existsByCircleIdAndUserId(circle.getId(), userId)) {
             throw new BizException("你不在这个圈子里");
         }

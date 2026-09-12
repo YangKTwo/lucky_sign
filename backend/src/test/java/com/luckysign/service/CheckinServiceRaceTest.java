@@ -60,15 +60,16 @@ class CheckinServiceRaceTest {
     @Test
     void completeRejectsAlreadyCompleted() {
         LocalDate today = LocalDate.now();
+        Long circleId = 5L;
         User user = createTestUser(1L);
         DailyDraw draw = createTestDraw(1L, 1L, today, DrawStatus.COMPLETED);
 
         when(drawService.today()).thenReturn(today);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(drawService.ensureDraw(1L, today)).thenReturn(draw);
+        when(drawService.ensureDraw(circleId, 1L, today)).thenReturn(draw);
 
         BizException ex = assertThrows(BizException.class,
-                () -> checkinService.complete(1L, "test content", null));
+                () -> checkinService.complete(circleId, 1L, "test content", null));
         assertEquals("今日已打卡", ex.getMessage());
         verify(checkinRecordRepository, never()).save(any());
     }
@@ -76,28 +77,30 @@ class CheckinServiceRaceTest {
     @Test
     void completeRejectsExpiredDraw() {
         LocalDate today = LocalDate.now();
+        Long circleId = 5L;
         User user = createTestUser(1L);
         DailyDraw draw = createTestDraw(1L, 1L, today, DrawStatus.EXPIRED);
 
         when(drawService.today()).thenReturn(today);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(drawService.ensureDraw(1L, today)).thenReturn(draw);
+        when(drawService.ensureDraw(circleId, 1L, today)).thenReturn(draw);
 
         BizException ex = assertThrows(BizException.class,
-                () -> checkinService.complete(1L, "test content", null));
+                () -> checkinService.complete(circleId, 1L, "test content", null));
         assertEquals("今日任务已过期", ex.getMessage());
     }
 
     @Test
     void completeSucceedsWithValidDraw() {
         LocalDate today = LocalDate.now();
+        Long circleId = 5L;
         User user = createTestUser(1L);
         user.setLastCheckinDate(today.minusDays(1));
         DailyDraw draw = createTestDraw(1L, 1L, today, DrawStatus.VIEWED);
 
         when(drawService.today()).thenReturn(today);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(drawService.ensureDraw(1L, today)).thenReturn(draw);
+        when(drawService.ensureDraw(circleId, 1L, today)).thenReturn(draw);
         when(drawService.rewardPoints(draw)).thenReturn(10);
         when(titleService.resolve(anyInt())).thenReturn("签到达人");
         when(checkinRecordRepository.save(any(CheckinRecord.class))).thenAnswer(inv -> {
@@ -106,7 +109,7 @@ class CheckinServiceRaceTest {
             return r;
         });
 
-        var response = checkinService.complete(1L, "完成任务", null);
+        var response = checkinService.complete(circleId, 1L, "完成任务", null);
 
         assertNotNull(response);
         verify(dailyDrawRepository).save(argThat(d -> d.getStatus() == DrawStatus.COMPLETED));
@@ -117,20 +120,21 @@ class CheckinServiceRaceTest {
     @Test
     void duplicateCheckinRecordThrowsDataIntegrityViolation() {
         LocalDate today = LocalDate.now();
+        Long circleId = 5L;
         User user = createTestUser(1L);
         user.setLastCheckinDate(today.minusDays(1));
         DailyDraw draw = createTestDraw(1L, 1L, today, DrawStatus.VIEWED);
 
         when(drawService.today()).thenReturn(today);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(drawService.ensureDraw(1L, today)).thenReturn(draw);
+        when(drawService.ensureDraw(circleId, 1L, today)).thenReturn(draw);
         when(drawService.rewardPoints(draw)).thenReturn(10);
         when(titleService.resolve(anyInt())).thenReturn("签到达人");
         when(checkinRecordRepository.save(any(CheckinRecord.class)))
                 .thenThrow(new DataIntegrityViolationException("Duplicate entry for key 'uk_user_checkin_date'"));
 
         assertThrows(DataIntegrityViolationException.class,
-                () -> checkinService.complete(1L, "完成任务", null));
+                () -> checkinService.complete(circleId, 1L, "完成任务", null));
     }
 
     private User createTestUser(Long id) {

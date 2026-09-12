@@ -17,3 +17,6 @@ spring:
 app:
   jwt:
     secret: test-secret-key-must-be-at-least-32-characters-long
+  cors:
+    allowed-origins: http://localhost:8080
+    production: false

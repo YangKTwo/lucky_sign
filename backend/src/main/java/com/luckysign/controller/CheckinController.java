@@ -26,56 +26,61 @@ public class CheckinController {
     }
 
     @GetMapping("/today")
-    public ApiResponse<CheckinDtos.TodayResponse> today() {
+    public ApiResponse<CheckinDtos.TodayResponse> today(@RequestParam(required = false) Long circleId) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(checkinService.today(userId));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(checkinService.today(resolvedCircleId, userId));
     }
 
     @PostMapping(value = "/complete", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<CheckinDtos.TodayResponse> complete(
+            @RequestParam(required = false) Long circleId,
             @RequestParam(value = "text", required = false) String text,
             @RequestParam(value = "image", required = false) MultipartFile image) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(checkinService.complete(userId, text, image));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(checkinService.complete(resolvedCircleId, userId, text, image));
     }
 
     @GetMapping("/history")
-    public ApiResponse<CheckinDtos.HistoryResponse> history() {
+    public ApiResponse<CheckinDtos.HistoryResponse> history(@RequestParam(required = false) Long circleId) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(checkinService.history(userId));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(checkinService.history(resolvedCircleId, userId));
     }
 
     @GetMapping("/calendar")
     public ApiResponse<CheckinDtos.CalendarResponse> calendar(
+            @RequestParam(required = false) Long circleId,
             @RequestParam(defaultValue = "84") int days) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
+        circleAccessGuard.requireMemberAndResolve(circleId, userId);
         return ApiResponse.ok(checkinService.calendar(userId, days));
     }
 
     @GetMapping("/streak")
-    public ApiResponse<Integer> streak() {
+    public ApiResponse<Integer> streak(@RequestParam(required = false) Long circleId) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(checkinService.today(userId).streakDays());
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(checkinService.today(resolvedCircleId, userId).streakDays());
     }
 
     @PostMapping("/{checkinId}/rate")
     public ApiResponse<RatingDtos.RatingSummary> rate(
+            @RequestParam(required = false) Long circleId,
             @PathVariable Long checkinId,
             @RequestBody RatingDtos.RateRequest request) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(ratingService.rate(userId, checkinId, request.score()));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(ratingService.rate(resolvedCircleId, userId, checkinId, request.score()));
     }
 
     @GetMapping("/{checkinId}")
-    public ApiResponse<RatingDtos.CheckinDetail> detail(@PathVariable Long checkinId) {
+    public ApiResponse<RatingDtos.CheckinDetail> detail(
+            @RequestParam(required = false) Long circleId,
+            @PathVariable Long checkinId) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(ratingService.detail(checkinId, userId));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(ratingService.detail(resolvedCircleId, checkinId, userId));
     }
 }
