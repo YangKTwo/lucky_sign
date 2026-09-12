@@ -53,13 +53,13 @@ public class CheckinService {
     }
 
     @Transactional
-    public CheckinDtos.TodayResponse today(Long userId) {
+    public CheckinDtos.TodayResponse today(Long circleId, Long userId) {
         LocalDate date = drawService.today();
         User user = userRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
         if (user.getTag() == UserTag.DORMANT) {
             throw new BizException("账号已休眠，请联系管理员解锁");
         }
-        DailyDraw draw = drawService.ensureDraw(userId, date);
+        DailyDraw draw = drawService.ensureDraw(circleId, userId, date);
         if (draw.getStatus() == DrawStatus.PENDING) {
             draw.setStatus(DrawStatus.VIEWED);
             dailyDrawRepository.save(draw);
@@ -68,13 +68,13 @@ public class CheckinService {
     }
 
     @Transactional
-    public CheckinDtos.TodayResponse complete(Long userId, String text, MultipartFile image) {
+    public CheckinDtos.TodayResponse complete(Long circleId, Long userId, String text, MultipartFile image) {
         LocalDate date = drawService.today();
         User user = userRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
         if (user.getTag() == UserTag.DORMANT) {
             throw new BizException("账号已休眠，请联系管理员解锁");
         }
-        DailyDraw draw = drawService.ensureDraw(userId, date);
+        DailyDraw draw = drawService.ensureDraw(circleId, userId, date);
         if (draw.getStatus() == DrawStatus.COMPLETED) {
             throw new BizException("今日已打卡");
         }
@@ -133,7 +133,7 @@ public class CheckinService {
         record.setStreakSnapshot(newStreak);
         record = checkinRecordRepository.save(record);
 
-        chatService.postCheckin(user, record, draw);
+        chatService.postCheckin(circleId, user, record, draw);
         return toToday(user, draw, record.getImageUrl(), record.getTextContent());
     }
 

@@ -59,25 +59,19 @@ public class ChatService {
         this.eventPublisher = eventPublisher;
     }
 
-    public Circle defaultCircle() {
-        return circleRepository.findFirstByOrderByIdAsc()
-                .orElseThrow(() -> new BizException("默认圈子未初始化"));
-    }
-
-    public ChatDtos.HistoryResponse history(Long viewerUserId, Long beforeId, int size) {
-        Circle circle = defaultCircle();
+    public ChatDtos.HistoryResponse history(Long circleId, Long viewerUserId, Long beforeId, int size) {
         int limit = Math.min(Math.max(size, 1), 50);
         List<ChatMessage> fetched;
         if (beforeId == null) {
-            fetched = chatMessageRepository.findByCircleIdOrderByIdDesc(circle.getId(), PageRequest.of(0, limit + 1));
+            fetched = chatMessageRepository.findByCircleIdOrderByIdDesc(circleId, PageRequest.of(0, limit + 1));
         } else {
             fetched = chatMessageRepository.findByCircleIdAndIdLessThanOrderByIdDesc(
-                    circle.getId(), beforeId, PageRequest.of(0, limit + 1));
+                    circleId, beforeId, PageRequest.of(0, limit + 1));
         }
         boolean hasMore = fetched.size() > limit;
         List<ChatMessage> list = hasMore ? fetched.subList(0, limit) : fetched;
         List<Long> checkinIds = list.stream().map(ChatMessage::getCheckinId).filter(Objects::nonNull).toList();
-        Map<Long, RatingDtos.RatingSummary> ratings = ratingService.summaries(checkinIds, viewerUserId);
+        Map<Long, RatingDtos.RatingSummary> ratings = ratingService.summaries(circleId, checkinIds, viewerUserId);
         Map<Long, User> users = loadUsers(list);
         List<ChatDtos.MessageView> views = new ArrayList<>(list.stream()
                 .map(m -> toView(m, users.get(m.getUserId()), ratings.get(m.getCheckinId())))
@@ -87,7 +81,7 @@ public class ChatService {
     }
 
     @Transactional
-    public ChatDtos.MessageView sendText(Long userId, String content) {
+    public ChatDtos.MessageView sendText(Long circleId, Long userId, String content) {
         if (content == null || content.isBlank()) {
             throw new BizException("消息不能为空");
         }
@@ -98,11 +92,10 @@ public class ChatService {
         if (user.getTag() == UserTag.DORMANT) {
             throw new BizException("休眠账号禁言，请联系管理员解锁");
         }
-        Circle circle = defaultCircle();
         String text = content.trim();
-        List<Long> mentioned = mentionService.parseMentionedUserIds(text, circle.getId(), user.getId());
+        List<Long> mentioned = mentionService.parseMentionedUserIds(text, circleId, user.getId());
         ChatMessage msg = new ChatMessage();
-        msg.setCircleId(circle.getId());
+        msg.setCircleId(circleId);
         msg.setUserId(user.getId());
         msg.setNickname(user.getNickname());
         msg.setType(ChatMessageType.TEXT);
@@ -110,9 +103,9 @@ public class ChatService {
         msg.setMentionedUserIds(mentionService.serializeMentionIds(mentioned));
         msg = chatMessageRepository.save(msg);
         ChatDtos.MessageView view = toView(msg, user, null);
-        messagingTemplate.convertAndSend("/topic/chat", view);
+        messagingTemplate.convertAndSend("/topic/chat/" + circleId, view);
         if (aiAssistantService.isReady() && mentionService.mentionsAssistant(text)) {
-            Long pendingId = postAssistant(ASSISTANT_LOADING);
+            Long pendingId = postAssistant(circleId, ASSISTANT_LOADING);
             String question = mentionService.stripAssistantMentions(text);
             if (question.isBlank()) {
                 question = "你好，请简单介绍一下你自己，并说明你可以怎么帮助这个打卡小圈子。";
@@ -127,15 +120,14 @@ public class ChatService {
     }
 
     @Transactional
-    public void postCheckin(User user, CheckinRecord record, DailyDraw draw) {
-        Circle circle = defaultCircle();
+    public void postCheckin(Long circleId, User user, CheckinRecord record, DailyDraw draw) {
         String content = String.format("完成了%s任务：%s（+%d分%s）",
                 draw.getLevel().getDisplayName(),
                 draw.getTaskContent(),
                 record.getPointsEarned(),
                 Boolean.TRUE.equals(draw.getLuckyStar()) ? "，幸运星翻倍" : "");
         ChatMessage msg = new ChatMessage();
-        msg.setCircleId(circle.getId());
+        msg.setCircleId(circleId);
         msg.setUserId(user.getId());
         msg.setNickname(user.getNickname());
         msg.setType(ChatMessageType.CHECKIN);
@@ -143,30 +135,28 @@ public class ChatService {
         msg.setImageUrl(record.getImageUrl());
         msg.setCheckinId(record.getId());
         msg = chatMessageRepository.save(msg);
-        messagingTemplate.convertAndSend("/topic/chat", toView(msg, user, null));
+        messagingTemplate.convertAndSend("/topic/chat/" + circleId, toView(msg, user, null));
     }
 
     @Transactional
-    public void postSystem(String content) {
-        Circle circle = defaultCircle();
+    public void postSystem(Long circleId, String content) {
         ChatMessage msg = new ChatMessage();
-        msg.setCircleId(circle.getId());
+        msg.setCircleId(circleId);
         msg.setType(ChatMessageType.SYSTEM);
         msg.setContent(content);
         msg = chatMessageRepository.save(msg);
-        messagingTemplate.convertAndSend("/topic/chat", toView(msg, null, null));
+        messagingTemplate.convertAndSend("/topic/chat/" + circleId, toView(msg, null, null));
     }
 
     @Transactional
-    public Long postAssistant(String content) {
-        Circle circle = defaultCircle();
+    public Long postAssistant(Long circleId, String content) {
         ChatMessage msg = new ChatMessage();
-        msg.setCircleId(circle.getId());
+        msg.setCircleId(circleId);
         msg.setNickname(MentionService.ASSISTANT_DISPLAY_NAME);
         msg.setType(ChatMessageType.ASSISTANT);
         msg.setContent(content);
         msg = chatMessageRepository.save(msg);
-        messagingTemplate.convertAndSend("/topic/chat", toView(msg, null, null));
+        messagingTemplate.convertAndSend("/topic/chat/" + circleId, toView(msg, null, null));
         return msg.getId();
     }
 
@@ -181,7 +171,7 @@ public class ChatService {
         }
         msg.setContent(content);
         chatMessageRepository.save(msg);
-        messagingTemplate.convertAndSend("/topic/chat", toView(msg, null, null));
+        messagingTemplate.convertAndSend("/topic/chat/" + msg.getCircleId(), toView(msg, null, null));
     }
 
     private Map<Long, User> loadUsers(List<ChatMessage> list) {

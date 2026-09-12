@@ -103,7 +103,7 @@ public class AuthService {
             throw new BizException("加入圈子失败，请稍后重试");
         }
 
-        return generateAuthResponse(user);
+        return generateAuthResponse(user, circle.getId());
     }
 
     public AuthDtos.AuthResponse login(AuthDtos.LoginRequest req) {
@@ -119,7 +119,8 @@ public class AuthService {
         if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
             throw new BizException("邮箱或密码错误");
         }
-        return generateAuthResponse(user);
+        Long circleId = circleMemberRepository.findFirstCircleIdByUserId(user.getId()).orElse(null);
+        return generateAuthResponse(user, circleId);
     }
 
     @Transactional
@@ -149,13 +150,14 @@ public class AuthService {
             throw new BizException("令牌已失效，请重新登录");
         }
 
-        return generateAuthResponse(user);
+        Long circleId = circleMemberRepository.findFirstCircleIdByUserId(user.getId()).orElse(null);
+        return generateAuthResponse(user, circleId);
     }
 
-    private AuthDtos.AuthResponse generateAuthResponse(User user) {
+    private AuthDtos.AuthResponse generateAuthResponse(User user, Long circleId) {
         String accessToken = jwtService.generateAccessToken(user.getId(), user.getEmail(), user.getTokenVersion());
         String refreshToken = jwtService.generateRefreshToken(user.getId(), user.getTokenVersion());
-        return new AuthDtos.AuthResponse(accessToken, refreshToken, toProfile(user));
+        return new AuthDtos.AuthResponse(accessToken, refreshToken, toProfile(user), circleId);
     }
 
     private static String normalizeEmail(String email) {
@@ -189,7 +191,8 @@ public class AuthService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setTokenVersion(user.getTokenVersion() + 1);
         user = userRepository.save(user);
-        return generateAuthResponse(user);
+        Long circleId = circleMemberRepository.findFirstCircleIdByUserId(user.getId()).orElse(null);
+        return generateAuthResponse(user, circleId);
     }
 
     @Transactional

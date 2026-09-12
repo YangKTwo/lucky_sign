@@ -48,9 +48,7 @@ class ChatServiceHistoryTest {
         ChatService service = new ChatService(
                 chatMessageRepository, circleRepository, userRepository, messagingTemplate,
                 ratingService, aiAssistantService, mentionService, eventPublisher);
-        Circle circle = new Circle();
-        circle.setId(3L);
-        when(circleRepository.findFirstByOrderByIdAsc()).thenReturn(Optional.of(circle));
+        Long circleId = 3L;
         List<ChatMessage> extra = IntStream.rangeClosed(1, 3).mapToObj(i -> {
             ChatMessage m = new ChatMessage();
             m.setId((long) i);
@@ -59,12 +57,12 @@ class ChatServiceHistoryTest {
             m.setContent("hi");
             return m;
         }).toList();
-        when(chatMessageRepository.findByCircleIdOrderByIdDesc(eq(3L), any(PageRequest.class))).thenReturn(extra);
-        when(ratingService.summaries(any(), eq(9L))).thenReturn(new java.util.HashMap<>());
+        when(chatMessageRepository.findByCircleIdOrderByIdDesc(eq(circleId), any(PageRequest.class))).thenReturn(extra);
+        when(ratingService.summaries(eq(circleId), any(), eq(9L))).thenReturn(new java.util.HashMap<>());
         when(userRepository.findAllById(any())).thenReturn(List.of());
         when(mentionService.deserializeMentionIds(any())).thenReturn(List.of());
 
-        ChatDtos.HistoryResponse page = service.history(9L, null, 2);
+        ChatDtos.HistoryResponse page = service.history(circleId, 9L, null, 2);
         assertTrue(page.hasMore());
         assertFalse(page.messages().isEmpty());
     }

@@ -1,5 +1,7 @@
 package com.luckysign.scheduler;
 
+import com.luckysign.entity.Circle;
+import com.luckysign.repository.CircleRepository;
 import com.luckysign.service.DrawService;
 import com.luckysign.service.MailNotifyService;
 import com.luckysign.service.SettlementService;
@@ -15,20 +17,24 @@ public class DailyJobs {
     private final DrawService drawService;
     private final SettlementService settlementService;
     private final MailNotifyService mailNotifyService;
+    private final CircleRepository circleRepository;
 
     public DailyJobs(DrawService drawService,
                      SettlementService settlementService,
-                     MailNotifyService mailNotifyService) {
+                     MailNotifyService mailNotifyService,
+                     CircleRepository circleRepository) {
         this.drawService = drawService;
         this.settlementService = settlementService;
         this.mailNotifyService = mailNotifyService;
+        this.circleRepository = circleRepository;
     }
 
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Shanghai")
     public void generateDraws() {
-        log.info("Generating daily draws...");
-        drawService.ensureLuckyStar(drawService.today());
-        drawService.generateForAllActiveUsers();
+        log.info("Generating daily draws for all circles...");
+        for (Circle circle : circleRepository.findAll()) {
+            drawService.generateForAllActiveUsers(circle.getId());
+        }
     }
 
     @Scheduled(cron = "0 10 0 * * *", zone = "Asia/Shanghai")

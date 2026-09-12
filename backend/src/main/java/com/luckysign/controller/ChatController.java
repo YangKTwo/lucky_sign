@@ -20,17 +20,20 @@ public class ChatController {
 
     @GetMapping("/messages")
     public ApiResponse<ChatDtos.HistoryResponse> history(
+            @RequestParam(required = false) Long circleId,
             @RequestParam(required = false) Long beforeId,
             @RequestParam(defaultValue = "30") int size) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(chatService.history(userId, beforeId, size));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(chatService.history(resolvedCircleId, userId, beforeId, size));
     }
 
     @PostMapping("/messages")
-    public ApiResponse<ChatDtos.MessageView> send(@RequestBody ChatDtos.SendTextRequest request) {
+    public ApiResponse<ChatDtos.MessageView> send(
+            @RequestParam(required = false) Long circleId,
+            @RequestBody ChatDtos.SendTextRequest request) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMember(userId);
-        return ApiResponse.ok(chatService.sendText(userId, request.content()));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(chatService.sendText(resolvedCircleId, userId, request.content()));
     }
 }
