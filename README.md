@@ -199,6 +199,64 @@ GitHub → Actions → **Deploy backend** / **Publish APK** / **Publish Web** �
 - Nginx 反向代理（生产 HTTP）：[`deploy/nginx-lucky-api.conf`](deploy/nginx-lucky-api.conf)
 - Nginx 反向代理（TLS 示例）：[`deploy/nginx-example.conf`](deploy/nginx-example.conf)
 
+## WebSocket (WSS) 排查
+
+后端 STOMP 端点注册在 `/ws`（精确路径，非 `/ws/`）。
+
+### 快速探测
+
+```bash
+# 本地后端测试
+./deploy/wss-probe.sh http://127.0.0.1:8080
+
+# 生产环境测试（通过 nginx）
+./deploy/wss-probe.sh https://your-domain.example
+```
+
+成功时返回 **HTTP 101 Switching Protocols**。
+
+### 常见问题
+
+| 现象 | 可能原因 | 排查 |
+|------|----------|------|
+| HTTP 404 | Security 配置未放行 `/ws` | 确保 `requestMatchers("/ws", "/ws/**").permitAll()` |
+| HTTP 403 | CSRF 拦截 | 确保 CSRF 忽略 `/ws` 和 `/ws/**` |
+| HTTP 429 | 被限流 | 确保 RateLimitFilter 豁免 `/ws` 路径 |
+| `NoResourceFoundException: No static resource ws` | Spring 把 `/ws` 当静态资源处理 | 检查 WebSocketConfig 是否正确注册端点 |
+| 通过 nginx 返回 502/504 | nginx 未正确代理 Upgrade | 检查 nginx `location = /ws` 和 `Connection $connection_upgrade` |
+
+### 后端检查清单
+
+1. **SecurityConfig**：`requestMatchers("/ws", "/ws/**").permitAll()` + CSRF 忽略
+2. **RateLimitFilter**：豁免 `/ws` 和 `/ws/**`
+3. **GlobalExceptionHandler**：不要把 WS 握手异常转为通用 JSON 错误
+4. **WebSocketConfig**：`registry.addEndpoint("/ws")`
+
+### Nginx 检查清单（运维操作）
+
+> ⚠️ nginx 配置由运维管理，开发者仅需确保后端正确。
+
+需要在 `http{}` 块添加 map 指令（Baota 面板需手动编辑 nginx.conf）：
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+```
+
+然后配置 location（注意 `= /ws` 精确匹配）：
+
+```nginx
+location = /ws {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    # ... 其他 headers
+}
+```
+
 ## 说明
 
 - 邮件默认关闭（`app.mail.enabled=false`），仅打日志
