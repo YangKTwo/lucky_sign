@@ -35,10 +35,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${DEPLOY_HOST}" ]]; then
-            echo "DEPLOY_HOST secret is empty" >&2
+            echo "::error::DEPLOY_HOST secret is empty"
             exit 1
           fi
-          WEB_URL="http://${DEPLOY_HOST}/app/"
+          # Use https:// for all published URLs (requires TLS on server)
+          WEB_URL="https://${DEPLOY_HOST}/app/"
           echo "web_url=${WEB_URL}" >> "$GITHUB_OUTPUT"
           mkdir -p dist
           printf '%s\n' "$WEB_URL" > dist/web-latest.txt
