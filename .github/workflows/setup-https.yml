@@ -80,19 +80,26 @@ jobs:
             
             echo "=== Setting up HTTPS for ${DOMAIN} ==="
             
-            # Detect package manager
+            # Detect package manager and OS
             if command -v apt-get &>/dev/null; then
               PKG_MGR="apt"
               echo "Detected: Debian/Ubuntu (apt)"
-            elif command -v yum &>/dev/null; then
-              PKG_MGR="yum"
-              echo "Detected: RHEL/CentOS (yum)"
             elif command -v dnf &>/dev/null; then
               PKG_MGR="dnf"
               echo "Detected: Fedora/RHEL 8+ (dnf)"
+            elif command -v yum &>/dev/null; then
+              PKG_MGR="yum"
+              echo "Detected: RHEL/CentOS (yum)"
             else
               echo "ERROR: Could not detect package manager"
               exit 1
+            fi
+            
+            # Detect Alibaba Linux to avoid epel-release conflicts
+            IS_ALINUX=false
+            if grep -qiE '(alibaba|alinux|aliyun)' /etc/os-release 2>/dev/null; then
+              IS_ALINUX=true
+              echo "Detected: Alibaba Cloud Linux"
             fi
             
             # Install nginx if not present
@@ -101,29 +108,97 @@ jobs:
               if [[ "$PKG_MGR" == "apt" ]]; then
                 sudo apt-get update -qq
                 sudo apt-get install -y -qq nginx
-              elif [[ "$PKG_MGR" == "yum" ]]; then
-                sudo yum install -y -q epel-release
-                sudo yum install -y -q nginx
               else
-                sudo dnf install -y -q nginx
+                # yum/dnf: try direct install first (works on alinux with epel-aliyuncs-release)
+                sudo $PKG_MGR install -y -q nginx 2>/dev/null || {
+                  # Only install epel-release if not Alibaba Linux and epel not present
+                  if [[ "$IS_ALINUX" == "false" ]] && ! rpm -q epel-release &>/dev/null && ! rpm -q epel-aliyuncs-release &>/dev/null; then
+                    echo "Installing EPEL repository..."
+                    sudo $PKG_MGR install -y -q epel-release || true
+                  fi
+                  sudo $PKG_MGR install -y -q nginx
+                }
               fi
             fi
             echo "nginx version: $(nginx -v 2>&1)"
             
-            # Install certbot with nginx plugin
-            if ! command -v certbot &>/dev/null; then
+            # Install certbot - with fallbacks for different distros
+            CERTBOT_METHOD=""
+            HAS_NGINX_PLUGIN=false
+            
+            if command -v certbot &>/dev/null; then
+              CERTBOT_METHOD="existing"
+              echo "certbot already installed"
+            fi
+            
+            # Try package manager install
+            if [[ -z "$CERTBOT_METHOD" ]]; then
               echo "Installing certbot..."
               if [[ "$PKG_MGR" == "apt" ]]; then
                 sudo apt-get update -qq
-                sudo apt-get install -y -qq certbot python3-certbot-nginx
-              elif [[ "$PKG_MGR" == "yum" ]]; then
-                sudo yum install -y -q epel-release
-                sudo yum install -y -q certbot python3-certbot-nginx
+                if sudo apt-get install -y -qq certbot python3-certbot-nginx 2>/dev/null; then
+                  CERTBOT_METHOD="apt"
+                fi
               else
-                sudo dnf install -y -q certbot python3-certbot-nginx
+                # yum/dnf: try direct install first without adding epel-release
+                if sudo $PKG_MGR install -y -q certbot python3-certbot-nginx 2>/dev/null; then
+                  CERTBOT_METHOD="$PKG_MGR"
+                elif sudo $PKG_MGR install -y -q certbot 2>/dev/null; then
+                  CERTBOT_METHOD="$PKG_MGR-no-plugin"
+                else
+                  # Only try epel-release if not Alibaba Linux and epel not already present
+                  if [[ "$IS_ALINUX" == "false" ]] && ! rpm -q epel-release &>/dev/null && ! rpm -q epel-aliyuncs-release &>/dev/null; then
+                    echo "Trying with EPEL repository..."
+                    sudo $PKG_MGR install -y -q epel-release 2>/dev/null || true
+                    if sudo $PKG_MGR install -y -q certbot python3-certbot-nginx 2>/dev/null; then
+                      CERTBOT_METHOD="$PKG_MGR-epel"
+                    elif sudo $PKG_MGR install -y -q certbot 2>/dev/null; then
+                      CERTBOT_METHOD="$PKG_MGR-epel-no-plugin"
+                    fi
+                  fi
+                fi
               fi
             fi
+            
+            # Fallback: snap install
+            if [[ -z "$CERTBOT_METHOD" ]] && command -v snap &>/dev/null; then
+              echo "Trying snap install..."
+              if sudo snap install --classic certbot 2>/dev/null; then
+                sudo ln -sf /snap/bin/certbot /usr/bin/certbot 2>/dev/null || true
+                CERTBOT_METHOD="snap"
+              fi
+            fi
+            
+            # Fallback: pip/venv install
+            if [[ -z "$CERTBOT_METHOD" ]]; then
+              echo "Trying pip/venv install..."
+              sudo $PKG_MGR install -y -q python3 python3-pip python3-venv 2>/dev/null || \
+                sudo apt-get install -y -qq python3 python3-pip python3-venv 2>/dev/null || true
+              if command -v python3 &>/dev/null; then
+                sudo python3 -m venv /opt/certbot-venv
+                sudo /opt/certbot-venv/bin/pip install --upgrade pip 2>/dev/null || true
+                if sudo /opt/certbot-venv/bin/pip install certbot 2>/dev/null; then
+                  sudo ln -sf /opt/certbot-venv/bin/certbot /usr/bin/certbot
+                  CERTBOT_METHOD="pip"
+                fi
+              fi
+            fi
+            
+            if [[ -z "$CERTBOT_METHOD" ]]; then
+              echo "ERROR: Failed to install certbot via any method"
+              exit 1
+            fi
+            
+            echo "certbot installed via: ${CERTBOT_METHOD}"
             echo "certbot version: $(certbot --version 2>&1)"
+            
+            # Check if nginx plugin is available
+            if certbot plugins 2>/dev/null | grep -q nginx; then
+              HAS_NGINX_PLUGIN=true
+              echo "nginx plugin: available"
+            else
+              echo "nginx plugin: NOT available (will use webroot)"
+            fi
             
             # Ensure required directories
             echo "Creating directories..."
@@ -183,12 +258,20 @@ jobs:
               sudo systemctl reload nginx || sudo systemctl start nginx
               
               echo "Obtaining Let's Encrypt certificate..."
-              CERTBOT_OPTS="--nginx -d ${DOMAIN} --non-interactive --agree-tos --register-unsafely-without-email"
+              CERTBOT_BASE_OPTS="--non-interactive --agree-tos --register-unsafely-without-email"
               if [[ "${USE_STAGING}" == "true" ]]; then
-                CERTBOT_OPTS="${CERTBOT_OPTS} --staging"
+                CERTBOT_BASE_OPTS="${CERTBOT_BASE_OPTS} --staging"
                 echo "Using Let's Encrypt STAGING server"
               fi
-              sudo certbot ${CERTBOT_OPTS}
+              
+              # Use nginx plugin if available, otherwise use webroot
+              if [[ "$HAS_NGINX_PLUGIN" == "true" ]]; then
+                echo "Using certbot nginx plugin..."
+                sudo certbot --nginx -d "${DOMAIN}" ${CERTBOT_BASE_OPTS}
+              else
+                echo "Using certbot webroot method..."
+                sudo certbot certonly --webroot -w /var/www/certbot -d "${DOMAIN}" ${CERTBOT_BASE_OPTS}
+              fi
             fi
             
             # Now create the full HTTPS config
