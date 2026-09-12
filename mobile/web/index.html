@@ -20,8 +20,46 @@
   <title>今日幸运签</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#C45C26">
+  <style>
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #FFF8F5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #loading h1 {
+      margin: 0 0 16px;
+      font-size: 28px;
+      font-weight: 600;
+      color: #C45C26;
+    }
+    #loading p {
+      margin: 0;
+      font-size: 14px;
+      color: #999;
+    }
+    #loading .spinner {
+      width: 24px;
+      height: 24px;
+      margin-top: 20px;
+      border: 3px solid #F5E0D3;
+      border-top-color: #C45C26;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
+  <div id="loading">
+    <h1>今日幸运签</h1>
+    <p>加载中…</p>
+    <div class="spinner"></div>
+  </div>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
