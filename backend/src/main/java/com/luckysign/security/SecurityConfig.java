@@ -1,6 +1,6 @@
 package com.luckysign.security;
 
-import org.springframework.beans.factory.annotation.Value;
+import com.luckysign.config.CorsProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -17,7 +17,6 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -25,17 +24,14 @@ import java.util.List;
 public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
     private final RateLimitFilter rateLimitFilter;
-    private final List<String> corsOrigins;
+    private final CorsProperties corsProperties;
 
     public SecurityConfig(JwtAuthFilter jwtAuthFilter,
                           RateLimitFilter rateLimitFilter,
-                          @Value("${app.cors.allowed-origins:*}") String corsOrigins) {
+                          CorsProperties corsProperties) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.rateLimitFilter = rateLimitFilter;
-        this.corsOrigins = Arrays.stream(corsOrigins.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .toList();
+        this.corsProperties = corsProperties;
     }
 
     @Bean
@@ -62,14 +58,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        List<String> origins;
-        if (corsOrigins.isEmpty() || corsOrigins.contains("*")) {
-            origins = List.of("http://localhost:*", "https://localhost:*");
-        } else {
-            origins = corsOrigins.stream()
-                    .filter(o -> !o.equals("*"))
-                    .toList();
-        }
+        List<String> origins = corsProperties.getEffectiveOrigins();
         config.setAllowedOriginPatterns(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
