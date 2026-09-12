@@ -625,8 +625,21 @@ jobs:
                     proxy_set_header X-Forwarded-Proto $scheme;
                 }
             
-                # WebSocket proxy
+                # ===================================================================
+                # WebSocket Proxy Configuration
+                # ===================================================================
                 # NOTE: Requires $connection_upgrade map in main nginx.conf http{} block
+                #
+                # ANTI-PATTERN (DO NOT USE):
+                #   proxy_pass http://lucky_backend/ws/;   # trailing slash rewrites path!
+                #
+                # When proxy_pass has trailing slash, nginx rewrites /ws → /ws/,
+                # causing Spring Boot: NoResourceFoundException: No static resource ws/
+                #
+                # CORRECT PATTERNS:
+                #   proxy_pass http://upstream;            # no URI = no rewrite
+                #   proxy_pass http://upstream/ws;         # explicit /ws (no trailing /)
+                # ===================================================================
                 location = /ws {
                     proxy_pass http://lucky_backend/ws;
                     proxy_http_version 1.1;
