@@ -1,5 +1,6 @@
 package com.luckysign.common;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -10,6 +11,9 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -54,10 +58,56 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse<>(false, "数据处理错误", null));
     }
 
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFound(NoResourceFoundException e) throws NoResourceFoundException {
+        String path = getRequestPath();
+        if (isWebSocketPath(path)) {
+            log.warn("WebSocket handshake failed for path {}: {} (letting it propagate for proper WS error handling)",
+                    path, e.getMessage());
+            throw e;
+        }
+        log.warn("No resource found: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiResponse<>(false, "资源不存在", null));
+    }
+
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleOther(Exception e) {
+    public ResponseEntity<ApiResponse<Void>> handleOther(Exception e) throws Exception {
+        String path = getRequestPath();
+        if (isWebSocketPath(path) && isWebSocketHandshakeException(e)) {
+            log.warn("WebSocket handshake exception for path {}: {} ({})",
+                    path, e.getMessage(), e.getClass().getName());
+            throw e;
+        }
         log.error("Unhandled error", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new ApiResponse<>(false, "服务器错误", null));
+    }
+
+    private String getRequestPath() {
+        try {
+            ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attrs != null) {
+                HttpServletRequest request = attrs.getRequest();
+                return request.getRequestURI();
+            }
+        } catch (Exception ignored) {
+        }
+        return "";
+    }
+
+    private boolean isWebSocketPath(String path) {
+        return path != null && (path.equals("/ws") || path.startsWith("/ws/"));
+    }
+
+    private boolean isWebSocketHandshakeException(Exception e) {
+        String className = e.getClass().getName().toLowerCase();
+        String message = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+        return className.contains("websocket")
+                || className.contains("handshake")
+                || className.contains("upgrade")
+                || message.contains("upgrade")
+                || message.contains("websocket")
+                || message.contains("handshake");
     }
 }

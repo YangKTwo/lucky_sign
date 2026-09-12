@@ -52,6 +52,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String path = request.getRequestURI();
+
+        if (isWebSocketPath(path)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         String clientKey = resolveClientKey(request);
 
         if (isAuthEndpoint(path)) {
@@ -71,6 +77,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private boolean isWebSocketPath(String path) {
+        return path != null && (path.equals("/ws") || path.startsWith("/ws/"));
     }
 
     private boolean isAuthEndpoint(String path) {
