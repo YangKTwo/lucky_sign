@@ -105,24 +105,37 @@ jobs:
             # Install nginx if not present
             if ! command -v nginx &>/dev/null; then
               echo "Installing nginx..."
+              set +e  # Disable exit on error for install attempts
               if [[ "$PKG_MGR" == "apt" ]]; then
                 sudo apt-get update -qq
                 sudo apt-get install -y -qq nginx
+                NGINX_RC=$?
               else
-                # yum/dnf: try direct install first (works on alinux with epel-aliyuncs-release)
-                sudo $PKG_MGR install -y -q nginx 2>/dev/null || {
+                # yum/dnf: try direct install first
+                echo "Attempting: $PKG_MGR install nginx"
+                sudo $PKG_MGR install -y nginx 2>&1 | tail -20
+                NGINX_RC=$?
+                if [[ $NGINX_RC -ne 0 ]]; then
+                  echo "Direct nginx install failed (exit $NGINX_RC)"
                   # Only install epel-release if not Alibaba Linux and epel not present
                   if [[ "$IS_ALINUX" == "false" ]] && ! rpm -q epel-release &>/dev/null && ! rpm -q epel-aliyuncs-release &>/dev/null; then
                     echo "Installing EPEL repository..."
-                    sudo $PKG_MGR install -y -q epel-release || true
+                    sudo $PKG_MGR install -y epel-release 2>&1 | tail -10 || true
                   fi
-                  sudo $PKG_MGR install -y -q nginx
-                }
+                  sudo $PKG_MGR install -y nginx 2>&1 | tail -20
+                  NGINX_RC=$?
+                fi
+              fi
+              set -e  # Re-enable exit on error
+              if [[ $NGINX_RC -ne 0 ]] && ! command -v nginx &>/dev/null; then
+                echo "ERROR: Failed to install nginx"
+                exit 1
               fi
             fi
             echo "nginx version: $(nginx -v 2>&1)"
             
             # Install certbot - with fallbacks for different distros
+            # Use set +e to prevent script abort on install failures
             CERTBOT_METHOD=""
             HAS_NGINX_PLUGIN=false
             
@@ -131,29 +144,80 @@ jobs:
               echo "certbot already installed"
             fi
             
-            # Try package manager install
+            set +e  # Disable exit on error for all certbot install attempts
+            
+            # On Alibaba Linux, prefer pip install (repos often lack certbot)
+            if [[ -z "$CERTBOT_METHOD" ]] && [[ "$IS_ALINUX" == "true" ]]; then
+              echo "Alibaba Linux detected - trying pip/venv install first..."
+              echo "Installing Python dependencies..."
+              sudo $PKG_MGR install -y python3 python3-pip 2>&1 | tail -10
+              # Try python3-venv, fall back to python3-virtualenv
+              sudo $PKG_MGR install -y python3-venv 2>&1 | tail -5 || \
+                sudo $PKG_MGR install -y python3-virtualenv 2>&1 | tail -5 || true
+              
+              if command -v python3 &>/dev/null; then
+                echo "Creating certbot virtualenv..."
+                sudo rm -rf /opt/certbot-venv 2>/dev/null || true
+                sudo python3 -m venv /opt/certbot-venv 2>&1 || sudo python3 -m virtualenv /opt/certbot-venv 2>&1 || true
+                if [[ -f /opt/certbot-venv/bin/pip ]]; then
+                  echo "Installing certbot via pip..."
+                  sudo /opt/certbot-venv/bin/pip install --upgrade pip 2>&1 | tail -5
+                  sudo /opt/certbot-venv/bin/pip install certbot 2>&1 | tail -10
+                  PIP_RC=$?
+                  if [[ $PIP_RC -eq 0 ]] && [[ -f /opt/certbot-venv/bin/certbot ]]; then
+                    sudo ln -sf /opt/certbot-venv/bin/certbot /usr/bin/certbot
+                    CERTBOT_METHOD="pip-alinux"
+                    echo "certbot installed via pip (Alibaba Linux)"
+                  else
+                    echo "pip install certbot failed (exit $PIP_RC)"
+                  fi
+                else
+                  echo "Failed to create virtualenv"
+                fi
+              fi
+            fi
+            
+            # Try package manager install (apt or yum/dnf)
             if [[ -z "$CERTBOT_METHOD" ]]; then
-              echo "Installing certbot..."
+              echo "Installing certbot via package manager..."
               if [[ "$PKG_MGR" == "apt" ]]; then
                 sudo apt-get update -qq
-                if sudo apt-get install -y -qq certbot python3-certbot-nginx 2>/dev/null; then
+                sudo apt-get install -y -qq certbot python3-certbot-nginx 2>&1
+                APT_RC=$?
+                if [[ $APT_RC -eq 0 ]]; then
                   CERTBOT_METHOD="apt"
+                else
+                  echo "apt install failed (exit $APT_RC)"
                 fi
               else
                 # yum/dnf: try direct install first without adding epel-release
-                if sudo $PKG_MGR install -y -q certbot python3-certbot-nginx 2>/dev/null; then
+                echo "Attempting: $PKG_MGR install certbot python3-certbot-nginx"
+                sudo $PKG_MGR install -y certbot python3-certbot-nginx 2>&1 | tail -20
+                PKG_RC=$?
+                if [[ $PKG_RC -eq 0 ]]; then
                   CERTBOT_METHOD="$PKG_MGR"
-                elif sudo $PKG_MGR install -y -q certbot 2>/dev/null; then
-                  CERTBOT_METHOD="$PKG_MGR-no-plugin"
                 else
-                  # Only try epel-release if not Alibaba Linux and epel not already present
-                  if [[ "$IS_ALINUX" == "false" ]] && ! rpm -q epel-release &>/dev/null && ! rpm -q epel-aliyuncs-release &>/dev/null; then
-                    echo "Trying with EPEL repository..."
-                    sudo $PKG_MGR install -y -q epel-release 2>/dev/null || true
-                    if sudo $PKG_MGR install -y -q certbot python3-certbot-nginx 2>/dev/null; then
-                      CERTBOT_METHOD="$PKG_MGR-epel"
-                    elif sudo $PKG_MGR install -y -q certbot 2>/dev/null; then
-                      CERTBOT_METHOD="$PKG_MGR-epel-no-plugin"
+                  echo "$PKG_MGR install with nginx plugin failed (exit $PKG_RC)"
+                  echo "Attempting: $PKG_MGR install certbot (without nginx plugin)"
+                  sudo $PKG_MGR install -y certbot 2>&1 | tail -20
+                  PKG_RC=$?
+                  if [[ $PKG_RC -eq 0 ]]; then
+                    CERTBOT_METHOD="$PKG_MGR-no-plugin"
+                  else
+                    echo "$PKG_MGR install certbot failed (exit $PKG_RC)"
+                    # Only try epel-release if not Alibaba Linux and epel not already present
+                    if [[ "$IS_ALINUX" == "false" ]] && ! rpm -q epel-release &>/dev/null && ! rpm -q epel-aliyuncs-release &>/dev/null; then
+                      echo "Trying with EPEL repository..."
+                      sudo $PKG_MGR install -y epel-release 2>&1 | tail -10 || true
+                      sudo $PKG_MGR install -y certbot python3-certbot-nginx 2>&1 | tail -20
+                      if [[ $? -eq 0 ]]; then
+                        CERTBOT_METHOD="$PKG_MGR-epel"
+                      else
+                        sudo $PKG_MGR install -y certbot 2>&1 | tail -20
+                        if [[ $? -eq 0 ]]; then
+                          CERTBOT_METHOD="$PKG_MGR-epel-no-plugin"
+                        fi
+                      fi
                     fi
                   fi
                 fi
@@ -163,26 +227,44 @@ jobs:
             # Fallback: snap install
             if [[ -z "$CERTBOT_METHOD" ]] && command -v snap &>/dev/null; then
               echo "Trying snap install..."
-              if sudo snap install --classic certbot 2>/dev/null; then
+              sudo snap install --classic certbot 2>&1 | tail -10
+              SNAP_RC=$?
+              if [[ $SNAP_RC -eq 0 ]]; then
                 sudo ln -sf /snap/bin/certbot /usr/bin/certbot 2>/dev/null || true
                 CERTBOT_METHOD="snap"
+              else
+                echo "snap install failed (exit $SNAP_RC)"
               fi
             fi
             
-            # Fallback: pip/venv install
+            # Fallback: pip/venv install (for non-alinux systems that failed above)
             if [[ -z "$CERTBOT_METHOD" ]]; then
-              echo "Trying pip/venv install..."
-              sudo $PKG_MGR install -y -q python3 python3-pip python3-venv 2>/dev/null || \
-                sudo apt-get install -y -qq python3 python3-pip python3-venv 2>/dev/null || true
+              echo "Trying pip/venv install as final fallback..."
+              if [[ "$PKG_MGR" == "apt" ]]; then
+                sudo apt-get install -y -qq python3 python3-pip python3-venv 2>&1 | tail -10 || true
+              else
+                sudo $PKG_MGR install -y python3 python3-pip 2>&1 | tail -10 || true
+                sudo $PKG_MGR install -y python3-venv 2>&1 | tail -5 || \
+                  sudo $PKG_MGR install -y python3-virtualenv 2>&1 | tail -5 || true
+              fi
               if command -v python3 &>/dev/null; then
-                sudo python3 -m venv /opt/certbot-venv
-                sudo /opt/certbot-venv/bin/pip install --upgrade pip 2>/dev/null || true
-                if sudo /opt/certbot-venv/bin/pip install certbot 2>/dev/null; then
-                  sudo ln -sf /opt/certbot-venv/bin/certbot /usr/bin/certbot
-                  CERTBOT_METHOD="pip"
+                sudo rm -rf /opt/certbot-venv 2>/dev/null || true
+                sudo python3 -m venv /opt/certbot-venv 2>&1 || sudo python3 -m virtualenv /opt/certbot-venv 2>&1 || true
+                if [[ -f /opt/certbot-venv/bin/pip ]]; then
+                  sudo /opt/certbot-venv/bin/pip install --upgrade pip 2>&1 | tail -5
+                  sudo /opt/certbot-venv/bin/pip install certbot 2>&1 | tail -10
+                  PIP_RC=$?
+                  if [[ $PIP_RC -eq 0 ]] && [[ -f /opt/certbot-venv/bin/certbot ]]; then
+                    sudo ln -sf /opt/certbot-venv/bin/certbot /usr/bin/certbot
+                    CERTBOT_METHOD="pip"
+                  else
+                    echo "pip install certbot failed (exit $PIP_RC)"
+                  fi
                 fi
               fi
             fi
+            
+            set -e  # Re-enable exit on error
             
             if [[ -z "$CERTBOT_METHOD" ]]; then
               echo "ERROR: Failed to install certbot via any method"
@@ -190,15 +272,17 @@ jobs:
             fi
             
             echo "certbot installed via: ${CERTBOT_METHOD}"
-            echo "certbot version: $(certbot --version 2>&1)"
+            certbot --version 2>&1 || true
             
             # Check if nginx plugin is available
+            set +e
             if certbot plugins 2>/dev/null | grep -q nginx; then
               HAS_NGINX_PLUGIN=true
               echo "nginx plugin: available"
             else
               echo "nginx plugin: NOT available (will use webroot)"
             fi
+            set -e
             
             # Ensure required directories
             echo "Creating directories..."
