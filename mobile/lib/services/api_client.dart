@@ -16,6 +16,7 @@ class ApiClient {
   String? _token;
   String? _refreshToken;
   int? _userId;
+  int? _circleId;
   bool _isRefreshing = false;
 
   static const _secureStorage = FlutterSecureStorage(
@@ -34,6 +35,7 @@ class ApiClient {
     }
     final prefs = await SharedPreferences.getInstance();
     _userId = prefs.getInt('userId');
+    _circleId = prefs.getInt('circleId');
   }
 
   Future<void> saveToken(String? token, {String? refreshToken}) async {
@@ -48,7 +50,9 @@ class ApiClient {
         await prefs.remove('token');
         await prefs.remove('refreshToken');
         await prefs.remove('userId');
+        await prefs.remove('circleId');
         _userId = null;
+        _circleId = null;
         _refreshToken = null;
       } else {
         await prefs.setString('token', token);
@@ -62,7 +66,9 @@ class ApiClient {
         await _secureStorage.delete(key: 'refreshToken');
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('userId');
+        await prefs.remove('circleId');
         _userId = null;
+        _circleId = null;
         _refreshToken = null;
       } else {
         await _secureStorage.write(key: 'token', value: token);
@@ -83,9 +89,20 @@ class ApiClient {
     }
   }
 
+  Future<void> saveCircleId(int? circleId) async {
+    _circleId = circleId;
+    final prefs = await SharedPreferences.getInstance();
+    if (circleId == null) {
+      await prefs.remove('circleId');
+    } else {
+      await prefs.setInt('circleId', circleId);
+    }
+  }
+
   String? get token => _token;
   String? get refreshToken => _refreshToken;
   int? get userId => _userId;
+  int? get circleId => _circleId;
   bool get isLoggedIn => _token != null && _token!.isNotEmpty;
 
   Future<void> saveLastEmail(String? email) async {

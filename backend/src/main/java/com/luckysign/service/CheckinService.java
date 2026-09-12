@@ -137,10 +137,10 @@ public class CheckinService {
         return toToday(user, draw, record.getImageUrl(), record.getTextContent());
     }
 
-    public CheckinDtos.HistoryResponse history(Long userId) {
+    public CheckinDtos.HistoryResponse history(Long circleId, Long userId) {
         List<CheckinRecord> records = checkinRecordRepository.findByUserIdOrderByCheckinDateDesc(userId);
         Map<Long, RatingDtos.RatingSummary> ratings = ratingService.summaries(
-                records.stream().map(CheckinRecord::getId).toList(), userId);
+                circleId, records.stream().map(CheckinRecord::getId).toList(), userId);
         List<CheckinDtos.HistoryItem> items = records.stream()
                 .map(r -> {
                     RatingDtos.RatingSummary s = ratings.get(r.getId());

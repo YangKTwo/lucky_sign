@@ -5,6 +5,7 @@ import com.luckysign.domain.PointChangeType;
 import com.luckysign.domain.UserTag;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.entity.User;
+import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.DailyDrawRepository;
 import com.luckysign.repository.UserRepository;
 import org.slf4j.Logger;
@@ -21,6 +22,7 @@ public class SettlementService {
 
     private final DailyDrawRepository dailyDrawRepository;
     private final UserRepository userRepository;
+    private final CircleMemberRepository circleMemberRepository;
     private final PointsService pointsService;
     private final DrawService drawService;
     private final TitleService titleService;
@@ -29,6 +31,7 @@ public class SettlementService {
 
     public SettlementService(DailyDrawRepository dailyDrawRepository,
                              UserRepository userRepository,
+                             CircleMemberRepository circleMemberRepository,
                              PointsService pointsService,
                              DrawService drawService,
                              TitleService titleService,
@@ -36,6 +39,7 @@ public class SettlementService {
                              ChatService chatService) {
         this.dailyDrawRepository = dailyDrawRepository;
         this.userRepository = userRepository;
+        this.circleMemberRepository = circleMemberRepository;
         this.pointsService = pointsService;
         this.drawService = drawService;
         this.titleService = titleService;
@@ -70,7 +74,9 @@ public class SettlementService {
                 user.setTag(UserTag.DORMANT);
                 mailNotifyService.sendWarning(user.getEmail(), "账号已休眠",
                         "你已连续7天未完成任务，账号进入休眠并禁言，请联系管理员解锁。");
-                chatService.postSystem(user.getNickname() + " 因连续7天未完成进入休眠");
+                for (Long cid : circleMemberRepository.findCircleIdsByUserId(user.getId())) {
+                    chatService.postSystem(cid, user.getNickname() + " 因连续7天未完成进入休眠");
+                }
             } else if (user.getMissStreakDays() >= 3) {
                 pointsService.resetToZero(user, PointChangeType.RESET_ZERO, draw.getId());
                 user.setTag(UserTag.DROPPED);

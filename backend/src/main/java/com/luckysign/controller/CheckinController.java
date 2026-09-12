@@ -45,8 +45,8 @@ public class CheckinController {
     @GetMapping("/history")
     public ApiResponse<CheckinDtos.HistoryResponse> history(@RequestParam(required = false) Long circleId) {
         Long userId = AuthSupport.currentUserId();
-        circleAccessGuard.requireMemberAndResolve(circleId, userId);
-        return ApiResponse.ok(checkinService.history(userId));
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(checkinService.history(resolvedCircleId, userId));
     }
 
     @GetMapping("/calendar")

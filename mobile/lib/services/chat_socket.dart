@@ -10,22 +10,31 @@ import 'api_client.dart';
 class ChatSocket {
   StompClient? _client;
   final _controller = StreamController<Map<String, dynamic>>.broadcast();
+  int? _circleId;
 
   Stream<Map<String, dynamic>> get messages => _controller.stream;
 
-  void connect() {
+  int? get circleId => _circleId;
+
+  void connect({int? circleId}) {
     disconnect();
     final token = ApiClient.instance.token;
     if (token == null || token.isEmpty) {
       debugPrint('ChatSocket: skip connect, no token');
       return;
     }
+    _circleId = circleId ?? ApiClient.instance.circleId;
+    if (_circleId == null) {
+      debugPrint('ChatSocket: skip connect, no circleId');
+      return;
+    }
+    final cid = _circleId;
     _client = StompClient(
       config: StompConfig(
         url: wsBaseUrl,
         onConnect: (frame) {
           _client?.subscribe(
-            destination: '/topic/chat',
+            destination: '/topic/chat/$cid',
             callback: (frame) {
               if (frame.body == null) return;
               final data = jsonDecode(frame.body!) as Map<String, dynamic>;
@@ -48,15 +57,24 @@ class ChatSocket {
   }
 
   void sendText(String content) {
-    _client?.send(
-      destination: '/app/chat.send',
-      body: jsonEncode({'content': content}),
-    );
+    final cid = _circleId;
+    if (cid != null) {
+      _client?.send(
+        destination: '/app/chat.send/$cid',
+        body: jsonEncode({'content': content}),
+      );
+    } else {
+      _client?.send(
+        destination: '/app/chat.send',
+        body: jsonEncode({'content': content}),
+      );
+    }
   }
 
   void disconnect() {
     _client?.deactivate();
     _client = null;
+    _circleId = null;
   }
 
   void dispose() {
