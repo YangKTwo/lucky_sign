@@ -15,6 +15,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate and resolve API bases
+        id: bases
+        env:
+          PUBLIC_API_BASE: ${{ vars.PUBLIC_API_BASE }}
+          PUBLIC_WS_BASE: ${{ vars.PUBLIC_WS_BASE }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          
+          # Determine API_BASE: prefer PUBLIC_API_BASE variable, else derive from DEPLOY_HOST
+          if [[ -n "${PUBLIC_API_BASE:-}" ]]; then
+            API_BASE="$PUBLIC_API_BASE"
+          elif [[ -n "${DEPLOY_HOST:-}" ]]; then
+            API_BASE="https://${DEPLOY_HOST}"
+          else
+            echo "::error::Neither PUBLIC_API_BASE variable nor DEPLOY_HOST secret is set"
+            exit 1
+          fi
+          
+          # Determine WS_BASE: prefer PUBLIC_WS_BASE variable, else derive from DEPLOY_HOST
+          if [[ -n "${PUBLIC_WS_BASE:-}" ]]; then
+            WS_BASE="$PUBLIC_WS_BASE"
+          elif [[ -n "${DEPLOY_HOST:-}" ]]; then
+            WS_BASE="wss://${DEPLOY_HOST}/ws"
+          else
+            echo "::error::Neither PUBLIC_WS_BASE variable nor DEPLOY_HOST secret is set"
+            exit 1
+          fi
+          
+          # Validate https:// prefix for API_BASE (no cleartext http in release)
+          if [[ ! "$API_BASE" =~ ^https:// ]]; then
+            echo "::error::API_BASE must use https:// (got: $API_BASE)"
+            exit 1
+          fi
+          
+          # Validate wss:// prefix for WS_BASE (no cleartext ws in release)
+          if [[ ! "$WS_BASE" =~ ^wss:// ]]; then
+            echo "::error::WS_BASE must use wss:// (got: $WS_BASE)"
+            exit 1
+          fi
+          
+          echo "api_base=${API_BASE}" >> "$GITHUB_OUTPUT"
+          echo "ws_base=${WS_BASE}" >> "$GITHUB_OUTPUT"
+          echo "✓ API_BASE=${API_BASE}"
+          echo "✓ WS_BASE=${WS_BASE}"
+
       - name: Resolve version
         id: ver
         run: |
@@ -27,14 +73,18 @@ jobs:
             CODE="1"
           fi
           BUILD="${{ github.run_number }}"
+          SHORT_SHA="${GITHUB_SHA:0:7}"
           APK_FILE="lucky-sign-${NAME}-${BUILD}.apk"
+          APK_FILE_SHA="lucky-sign-${NAME}-${BUILD}-${SHORT_SHA}.apk"
           {
             echo "name=${NAME}"
             echo "code=${CODE}"
             echo "build=${BUILD}"
             echo "apk_file=${APK_FILE}"
+            echo "apk_file_sha=${APK_FILE_SHA}"
+            echo "short_sha=${SHORT_SHA}"
           } >> "$GITHUB_OUTPUT"
-          echo "Resolved version name=${NAME} build=${BUILD} file=${APK_FILE}"
+          echo "Resolved version name=${NAME} build=${BUILD} sha=${SHORT_SHA} file=${APK_FILE}"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -58,33 +108,43 @@ jobs:
 
       - name: Build release APK
         working-directory: mobile
+        env:
+          API_BASE: ${{ steps.bases.outputs.api_base }}
+          WS_BASE: ${{ steps.bases.outputs.ws_base }}
         run: |
           flutter pub get
           flutter build apk --release \
             --build-name="${{ steps.ver.outputs.name }}" \
-            --build-number="${{ steps.ver.outputs.build }}"
+            --build-number="${{ steps.ver.outputs.build }}" \
+            --dart-define="API_BASE=${API_BASE}" \
+            --dart-define="WS_BASE=${WS_BASE}"
 
       - name: Prepare download files
         id: prep
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           APK_FILE: ${{ steps.ver.outputs.apk_file }}
+          APK_FILE_SHA: ${{ steps.ver.outputs.apk_file_sha }}
           VERSION_NAME: ${{ steps.ver.outputs.name }}
           BUILD_NUMBER: ${{ steps.ver.outputs.build }}
+          SHORT_SHA: ${{ steps.ver.outputs.short_sha }}
         run: |
           set -euo pipefail
           if [[ -z "${DEPLOY_HOST}" ]]; then
-            echo "DEPLOY_HOST secret is empty" >&2
+            echo "::error::DEPLOY_HOST secret is empty"
             exit 1
           fi
           mkdir -p dist/downloads
           SRC="mobile/build/app/outputs/flutter-apk/app-release.apk"
           cp "$SRC" "dist/downloads/${APK_FILE}"
-          # 兼容旧习惯：额外提供 latest 别名（内容与本版本相同）
+          # Optional: artifact with sha for traceability
+          cp "$SRC" "dist/downloads/${APK_FILE_SHA}"
+          # latest alias updated only after successful build
           cp "$SRC" "dist/downloads/lucky-sign-latest.apk"
           SIZE=$(stat -c%s "dist/downloads/${APK_FILE}")
           UPDATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          BASE="http://${DEPLOY_HOST}/downloads"
+          # Use https:// for all published URLs (requires TLS on server)
+          BASE="https://${DEPLOY_HOST}/downloads"
           URL="${BASE}/${APK_FILE}"
           LATEST_ALIAS="${BASE}/lucky-sign-latest.apk"
           PAGE="${BASE}/index.html"
@@ -92,7 +152,6 @@ jobs:
           echo "page=${PAGE}" >> "$GITHUB_OUTPUT"
           echo "alias=${LATEST_ALIAS}" >> "$GITHUB_OUTPUT"
 
-          # 纯文本，方便直接复制
           printf '%s\n' "$URL" > dist/downloads/latest.txt
 
           cat > dist/downloads/latest.json <<EOF
@@ -100,6 +159,7 @@ jobs:
             "file": "${APK_FILE}",
             "version": "${VERSION_NAME}",
             "build": ${BUILD_NUMBER},
+            "sha": "${SHORT_SHA}",
             "bytes": ${SIZE},
             "updatedAt": "${UPDATED}",
             "url": "${URL}",

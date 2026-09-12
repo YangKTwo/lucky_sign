@@ -37,7 +37,22 @@ flutter run -d emulator-5554
 # 或 flutter run -d chrome
 ```
 
-模拟器访问本机后端：`http://10.0.2.2:8080`（见 `mobile/lib/config.dart`）。也可用 `--dart-define=API_BASE=...` 覆盖。
+**调试模式**自动使用 `http://localhost:8080`（模拟器用 `http://10.0.2.2:8080`）。
+
+**Release 构建**必须通过 `--dart-define` 注入 API 地址：
+
+```bash
+# Release APK 必须提供 https/wss 地址
+flutter build apk --release \
+  --dart-define=API_BASE=https://your-domain.example \
+  --dart-define=WS_BASE=wss://your-domain.example/ws
+
+# Web 版同源部署时可省略（自动从页面 origin 推导）
+flutter build web --release --base-href=/app/
+```
+
+> ⚠️ **Release 构建不提供默认值**：如果缺少 `API_BASE` 或 `WS_BASE`，应用启动时会抛出 `StateError`。
+> 这是刻意设计——避免发布包意外连接到错误的后端。
 
 ## 自动部署（GitHub Actions → ECS）
 
@@ -46,6 +61,9 @@ flutter run -d emulator-5554
 推送到 `main` 且改动了 `mobile/**` 时，会自动：
 
 1. **安卓 APK**
+   - **CI 验证**：检查 `PUBLIC_API_BASE` / `PUBLIC_WS_BASE` 或从 `DEPLOY_HOST` 派生，必须 https/wss
+   - 验证失败时 **exit 1，不上传任何文件**，不覆盖 `lucky-sign-latest.apk`
+   - 构建时注入 `--dart-define=API_BASE=...` 和 `--dart-define=WS_BASE=...`
    - 文件名带版本：`lucky-sign-<version>-<build>.apk`（build 取 GitHub run number）
    - `downloads/latest.txt` — APK 链接一行文本，方便复制
    - `downloads/latest.json` / `index.html` 下载页
@@ -53,7 +71,8 @@ flutter run -d emulator-5554
    - 另有别名 `lucky-sign-latest.apk`；历史版本包保留
 
 2. **网页版（给 iPhone / 浏览器）**
-   - 构建产物同步到服务器 `webapp/`，对外地址：`http://<主机>/app/`（nginx 代理 80 → 8080）
+   - 构建产物同步到服务器 `webapp/`，对外地址：`https://<主机>/app/`（需要 TLS 证书）
+   - API/WS 地址从页面 origin 自动推导（同源部署）
    - `downloads/web-latest.txt` — 网页链接一行文本
    - 与 APK **同一后端、同一账号数据**
    - Safari 可「分享 → 添加到主屏幕」
@@ -61,9 +80,11 @@ flutter run -d emulator-5554
 也可在 Actions 里手动跑 **Publish APK** / **Publish Web**。
 
 
-### 1. GitHub Secrets
+### 1. GitHub Secrets & Variables
 
-仓库 → Settings → Secrets and variables → Actions，新增：
+仓库 → Settings → Secrets and variables → Actions
+
+#### Secrets（敏感信息，不可公开）
 
 | Secret | 说明 |
 |--------|------|
@@ -71,6 +92,21 @@ flutter run -d emulator-5554
 | `DEPLOY_USER` | SSH 用户名 |
 | `DEPLOY_SSH_KEY` | 部署用私钥全文（含 `BEGIN`/`END`） |
 | `DEPLOY_PORT` | 可选，默认 `22` |
+
+> ⚠️ **不要把 JWT_SECRET、数据库密码、OSS 密钥等放入 `--dart-define`**——这些会编译进 APK/Web 产物，可被逆向提取。
+
+#### Variables（公开配置，用于 APK 构建）
+
+| Variable | 说明 |
+|----------|------|
+| `PUBLIC_API_BASE` | 可选。APK 内置的 API 地址，如 `https://api.example.com`。未设置时从 `DEPLOY_HOST` 派生 |
+| `PUBLIC_WS_BASE` | 可选。APK 内置的 WebSocket 地址，如 `wss://api.example.com/ws`。未设置时从 `DEPLOY_HOST` 派生 |
+
+**CI 会验证：**
+- `PUBLIC_API_BASE` 或 `DEPLOY_HOST` 至少有一个必须设置
+- API 地址必须以 `https://` 开头（release 禁止 http）
+- WS 地址必须以 `wss://` 开头（release 禁止 ws）
+- 验证失败时 CI 会 exit 1，**不会上传或覆盖 latest APK**
 
 ### 2. 服务器一次性准备
 
@@ -125,7 +161,8 @@ AI_MODEL=qwen-plus
 # 可选：
 # AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 # AI_MENTION=@助手
-# CORS_ORIGINS=https://your-web-origin.example
+# 生产环境 CORS 应明确列出允许的 https 域名
+CORS_ORIGINS=https://your-domain.example
 EOF
 chmod 600 /www/wwwroot/lucky-api/run.env
 ```
@@ -139,6 +176,7 @@ chmod 600 /www/wwwroot/lucky-api/run.env
 | MySQL / JWT / 管理员 | 服务器 `run.env` | `MYSQL_*` / `JWT_SECRET` / `ADMIN_PASSWORD` |
 | OSS | 同上，或 `application.yml` 的 `app.oss` | `OSS_ENABLED` / `OSS_ENDPOINT` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_BUCKET` |
 | 千问 | 同上 `app.ai` | `AI_ENABLED` / `AI_API_KEY` / `AI_MODEL` |
+| CORS | 服务器 `run.env` | `CORS_ORIGINS`（生产应明确列出 https 域名，如 `https://app.example.com`） |
 
 社区里发送带 `@助手` 的消息即可触发回复（需 `AI_ENABLED=true` 且填了 Key）。
 
