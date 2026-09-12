@@ -102,10 +102,13 @@ jobs:
               echo "Detected: Alibaba Cloud Linux"
             fi
             
+            # Disable exit-on-error for ALL install and certbot operations
+            # We will only exit explicitly on real failures
+            set +e
+            
             # Install nginx if not present
             if ! command -v nginx &>/dev/null; then
               echo "Installing nginx..."
-              set +e  # Disable exit on error for install attempts
               if [[ "$PKG_MGR" == "apt" ]]; then
                 sudo apt-get update -qq
                 sudo apt-get install -y -qq nginx
@@ -126,25 +129,29 @@ jobs:
                   NGINX_RC=$?
                 fi
               fi
-              set -e  # Re-enable exit on error
               if [[ $NGINX_RC -ne 0 ]] && ! command -v nginx &>/dev/null; then
                 echo "ERROR: Failed to install nginx"
                 exit 1
               fi
             fi
-            echo "nginx version: $(nginx -v 2>&1)"
+            echo "nginx version: $(nginx -v 2>&1 || true)"
             
             # Install certbot - with fallbacks for different distros
-            # Use set +e to prevent script abort on install failures
+            # NOTE: set +e is already active from nginx install section
+            
             CERTBOT_METHOD=""
             HAS_NGINX_PLUGIN=false
             
             if command -v certbot &>/dev/null; then
-              CERTBOT_METHOD="existing"
-              echo "certbot already installed"
+              # Check if existing certbot is from our pip venv
+              if [[ -x /opt/certbot-venv/bin/certbot ]]; then
+                CERTBOT_METHOD="pip-existing"
+                echo "certbot already installed (from pip venv)"
+              else
+                CERTBOT_METHOD="existing"
+                echo "certbot already installed (system package)"
+              fi
             fi
-            
-            set +e  # Disable exit on error for all certbot install attempts
             
             # On Alibaba Linux, prefer pip install (repos often lack certbot)
             if [[ -z "$CERTBOT_METHOD" ]] && [[ "$IS_ALINUX" == "true" ]]; then
@@ -264,8 +271,8 @@ jobs:
               fi
             fi
             
-            # NOTE: Keep set +e through certbot operations - certbot can return
-            # non-zero even on success (e.g. CryptographyDeprecationWarning on Python 3.6)
+            # NOTE: set +e remains active through all certbot operations
+            # certbot can return non-zero even on success (CryptographyDeprecationWarning)
             
             if [[ -z "$CERTBOT_METHOD" ]]; then
               echo "ERROR: Failed to install certbot via any method"
@@ -275,17 +282,25 @@ jobs:
             echo "certbot installed via: ${CERTBOT_METHOD}"
             # Print version safely - certbot may return non-zero with warnings
             echo -n "certbot version: "
-            certbot --version 2>&1 || echo "(version check returned non-zero)"
+            certbot --version 2>&1 || true
+            echo ""
             
-            # For pip-installed certbot, skip nginx plugin check - use webroot
-            HAS_NGINX_PLUGIN=false
-            if [[ "$CERTBOT_METHOD" == "pip"* ]]; then
-              echo "pip-installed certbot: using webroot method (nginx plugin not available)"
-            elif certbot plugins 2>&1 | grep -q "nginx"; then
-              HAS_NGINX_PLUGIN=true
-              echo "nginx plugin: available"
+            # For pip-installed or venv certbot, always use webroot (no nginx plugin)
+            # This includes: pip-alinux, pip-existing, pip, etc.
+            if [[ "$CERTBOT_METHOD" == pip* ]] || [[ -x /opt/certbot-venv/bin/certbot ]]; then
+              echo "pip/venv certbot detected: using webroot method (nginx plugin not available)"
+              HAS_NGINX_PLUGIN=false
             else
-              echo "nginx plugin: NOT available (will use webroot)"
+              # Check for nginx plugin - do this safely without pipefail issues
+              echo "Checking for nginx plugin..."
+              PLUGIN_OUTPUT=$(certbot plugins 2>&1 || true)
+              if echo "$PLUGIN_OUTPUT" | grep -q "nginx"; then
+                HAS_NGINX_PLUGIN=true
+                echo "nginx plugin: available"
+              else
+                HAS_NGINX_PLUGIN=false
+                echo "nginx plugin: NOT available (will use webroot)"
+              fi
             fi
             
             # Ensure required directories
