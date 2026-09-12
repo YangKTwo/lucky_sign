@@ -26,7 +26,18 @@ jobs:
         run: |
           flutter pub get
           # 挂在后端同源 /app/；API/WS 由页面自动推导
-          flutter build web --release --base-href=/app/
+          # --no-web-resources-cdn: 使用本地 CanvasKit 而非 gstatic CDN
+          # 原因：中国移动网络经常无法访问 gstatic.com，导致白屏
+          flutter build web --release --base-href=/app/ --no-web-resources-cdn
+
+      - name: Verify local CanvasKit
+        run: |
+          # 确认构建产物使用本地 CanvasKit 而非 gstatic CDN
+          if ! grep -q '"useLocalCanvasKit":true' mobile/build/web/flutter_bootstrap.js; then
+            echo "::error::flutter_bootstrap.js 缺少 useLocalCanvasKit:true，中国用户可能白屏"
+            exit 1
+          fi
+          echo "✓ 已确认使用本地 CanvasKit"
 
       - name: Resolve public URL
         id: url
