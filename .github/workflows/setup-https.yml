@@ -102,9 +102,10 @@ jobs:
               echo "Detected: Alibaba Cloud Linux"
             fi
             
-            # Disable exit-on-error for ALL install and certbot operations
+            # Disable exit-on-error and unset-variable-error for ALL install and certbot operations
             # We will only exit explicitly on real failures
-            set +e
+            # Note: -u causes issues when USE_STAGING is unset (boolean false from workflow input)
+            set +eu
             
             # Install nginx if not present
             if ! command -v nginx &>/dev/null; then
@@ -475,8 +476,9 @@ jobs:
               
               echo ""
               echo "Obtaining Let's Encrypt certificate..."
+              echo "USE_STAGING=${USE_STAGING:-«unset»}"
               CERTBOT_BASE_OPTS="--non-interactive --agree-tos --register-unsafely-without-email"
-              if [[ "${USE_STAGING}" == "true" ]]; then
+              if [[ "${USE_STAGING:-false}" == "true" ]]; then
                 CERTBOT_BASE_OPTS="${CERTBOT_BASE_OPTS} --staging"
                 echo "Using Let's Encrypt STAGING server"
               fi
