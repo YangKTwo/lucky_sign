@@ -627,6 +627,7 @@ jobs:
             
                 # WebSocket proxy
                 # NOTE: Requires $connection_upgrade map in main nginx.conf http{} block
+                # ANTI-PATTERN: NEVER use proxy_pass with trailing slash (rewrites /ws to /ws/)
                 location = /ws {
                     proxy_pass http://lucky_backend/ws;
                     proxy_http_version 1.1;
