@@ -310,50 +310,60 @@ jobs:
             sudo chown -R "$(whoami)":"$(whoami)" /www/wwwroot/lucky-api 2>/dev/null || true
             
             # Detect nginx configuration paths
+            # Check existence FIRST before any parsing to avoid pipefail issues
             echo "Detecting nginx configuration..."
             NGINX_MAIN_CONF=""
             NGINX_VHOST_DIR=""
             
-            # Try to get config path from nginx -t
-            NGINX_TEST_OUTPUT=$(sudo nginx -t 2>&1 || true)
-            echo "nginx -t output: $NGINX_TEST_OUTPUT"
-            
-            # Extract main config path from nginx -t output
-            DETECTED_CONF=$(echo "$NGINX_TEST_OUTPUT" | grep -oE '/[^ ]+nginx\.conf' | head -1 || true)
-            
-            # Check common nginx config locations
-            for CONF_PATH in \
-              "$DETECTED_CONF" \
-              "/etc/nginx/nginx.conf" \
-              "/www/server/nginx/conf/nginx.conf" \
-              "/usr/local/nginx/conf/nginx.conf" \
-              "/opt/nginx/conf/nginx.conf"; do
-              if [[ -n "$CONF_PATH" ]] && [[ -f "$CONF_PATH" ]]; then
-                NGINX_MAIN_CONF="$CONF_PATH"
-                break
-              fi
-            done
-            
-            if [[ -z "$NGINX_MAIN_CONF" ]]; then
-              echo "WARNING: Could not find nginx.conf, will try common vhost directories"
+            # Check BT Panel paths first (most specific)
+            echo "Checking for BT Panel nginx..."
+            if [[ -f "/www/server/nginx/conf/nginx.conf" ]]; then
+              NGINX_MAIN_CONF="/www/server/nginx/conf/nginx.conf"
+              echo "Found BT Panel nginx config: $NGINX_MAIN_CONF"
+            elif [[ -f "/etc/nginx/nginx.conf" ]]; then
+              NGINX_MAIN_CONF="/etc/nginx/nginx.conf"
+              echo "Found standard nginx config: $NGINX_MAIN_CONF"
+            elif [[ -f "/usr/local/nginx/conf/nginx.conf" ]]; then
+              NGINX_MAIN_CONF="/usr/local/nginx/conf/nginx.conf"
+              echo "Found custom nginx config: $NGINX_MAIN_CONF"
             else
-              echo "Found nginx config: $NGINX_MAIN_CONF"
+              # Try to get from nginx -t as last resort (safe parsing)
+              echo "Trying nginx -t to detect config path..."
+              NGINX_TEST_OUT=""
+              NGINX_TEST_OUT=$(sudo nginx -t 2>&1) || true
+              echo "nginx -t: $NGINX_TEST_OUT"
+              # Safe extraction without pipefail issues
+              if [[ "$NGINX_TEST_OUT" == *"/www/server/nginx/conf/nginx.conf"* ]]; then
+                NGINX_MAIN_CONF="/www/server/nginx/conf/nginx.conf"
+              elif [[ "$NGINX_TEST_OUT" == *"/etc/nginx/nginx.conf"* ]]; then
+                NGINX_MAIN_CONF="/etc/nginx/nginx.conf"
+              elif [[ "$NGINX_TEST_OUT" == *"/usr/local/nginx/conf/nginx.conf"* ]]; then
+                NGINX_MAIN_CONF="/usr/local/nginx/conf/nginx.conf"
+              fi
+              if [[ -n "$NGINX_MAIN_CONF" ]]; then
+                echo "Detected nginx config from nginx -t: $NGINX_MAIN_CONF"
+              else
+                echo "WARNING: Could not detect nginx.conf location"
+              fi
             fi
             
-            # Detect vhost directory - check BT Panel first, then standard locations
-            for VHOST_PATH in \
-              "/www/server/panel/vhost/nginx" \
-              "/www/server/nginx/conf/vhost" \
-              "/etc/nginx/sites-available" \
-              "/etc/nginx/conf.d"; do
-              if [[ -d "$VHOST_PATH" ]]; then
-                NGINX_VHOST_DIR="$VHOST_PATH"
-                echo "Found vhost directory: $NGINX_VHOST_DIR"
-                break
-              fi
-            done
+            # Detect vhost directory - check BT Panel first
+            echo "Checking for vhost directory..."
+            if [[ -d "/www/server/panel/vhost/nginx" ]]; then
+              NGINX_VHOST_DIR="/www/server/panel/vhost/nginx"
+              echo "Found BT Panel vhost directory: $NGINX_VHOST_DIR"
+            elif [[ -d "/www/server/nginx/conf/vhost" ]]; then
+              NGINX_VHOST_DIR="/www/server/nginx/conf/vhost"
+              echo "Found BT nginx vhost directory: $NGINX_VHOST_DIR"
+            elif [[ -d "/etc/nginx/sites-available" ]]; then
+              NGINX_VHOST_DIR="/etc/nginx/sites-available"
+              echo "Found Debian-style sites-available: $NGINX_VHOST_DIR"
+            elif [[ -d "/etc/nginx/conf.d" ]]; then
+              NGINX_VHOST_DIR="/etc/nginx/conf.d"
+              echo "Found conf.d directory: $NGINX_VHOST_DIR"
+            fi
             
-            # If no vhost dir found, create one based on detected main conf
+            # If no vhost dir found, create one
             if [[ -z "$NGINX_VHOST_DIR" ]]; then
               if [[ "$NGINX_MAIN_CONF" == "/www/server/nginx/conf/nginx.conf" ]]; then
                 NGINX_VHOST_DIR="/www/server/nginx/conf/vhost"
@@ -365,12 +375,17 @@ jobs:
               echo "Creating vhost directory: $NGINX_VHOST_DIR"
               sudo mkdir -p "$NGINX_VHOST_DIR"
               
-              # Try to add include to main conf if it exists and doesn't already include this dir
+              # Try to add include to main conf (only if file exists)
               if [[ -f "$NGINX_MAIN_CONF" ]]; then
-                if ! grep -q "$NGINX_VHOST_DIR" "$NGINX_MAIN_CONF" 2>/dev/null; then
+                # Check if include already exists (safe grep)
+                INCLUDE_EXISTS=""
+                INCLUDE_EXISTS=$(grep "$NGINX_VHOST_DIR" "$NGINX_MAIN_CONF" 2>/dev/null) || true
+                if [[ -z "$INCLUDE_EXISTS" ]]; then
                   echo "Adding include directive to $NGINX_MAIN_CONF"
                   sudo sed -i "/http *{/a\\    include $NGINX_VHOST_DIR/*.conf;" "$NGINX_MAIN_CONF" 2>/dev/null || \
-                    echo "WARNING: Could not add include directive, config may need manual adjustment"
+                    echo "WARNING: Could not add include directive"
+                else
+                  echo "Include directive already exists"
                 fi
               fi
             fi
@@ -378,6 +393,7 @@ jobs:
             # Set config file path
             NGINX_CONF="$NGINX_VHOST_DIR/lucky-sign.conf"
             echo "Will write nginx config to: $NGINX_CONF"
+            echo "Main nginx config: ${NGINX_MAIN_CONF:-not detected}"
             
             # Check if certificate already exists
             CERT_EXISTS=false
@@ -424,11 +440,13 @@ jobs:
                 exit 1
               fi
               
-              # Reload nginx - try multiple methods
+              # Reload nginx - try multiple methods including BT Panel path
               echo "Reloading nginx..."
               sudo systemctl enable nginx 2>/dev/null || true
               if sudo systemctl reload nginx 2>/dev/null; then
                 echo "nginx reloaded via systemctl"
+              elif sudo /www/server/nginx/sbin/nginx -s reload 2>/dev/null; then
+                echo "nginx reloaded via BT Panel nginx"
               elif sudo nginx -s reload 2>/dev/null; then
                 echo "nginx reloaded via nginx -s reload"
               elif sudo /etc/init.d/nginx reload 2>/dev/null; then
@@ -437,7 +455,9 @@ jobs:
                 echo "nginx started via systemctl"
               else
                 echo "WARNING: Could not reload nginx, trying restart"
-                sudo systemctl restart nginx 2>/dev/null || sudo nginx 2>/dev/null || true
+                sudo systemctl restart nginx 2>/dev/null || \
+                  sudo /www/server/nginx/sbin/nginx 2>/dev/null || \
+                  sudo nginx 2>/dev/null || true
               fi
               
               # Verify ACME challenge path is accessible locally before certbot
@@ -632,6 +652,7 @@ jobs:
             fi
             echo "Reloading nginx..."
             sudo systemctl reload nginx 2>/dev/null || \
+              sudo /www/server/nginx/sbin/nginx -s reload 2>/dev/null || \
               sudo nginx -s reload 2>/dev/null || \
               sudo /etc/init.d/nginx reload 2>/dev/null || \
               sudo systemctl restart nginx 2>/dev/null || true
