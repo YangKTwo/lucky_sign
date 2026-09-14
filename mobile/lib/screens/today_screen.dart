@@ -1,16 +1,18 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
+import '../utils/today_habits.dart';
+import '../widgets/checkin_proof_sheet.dart';
 import '../widgets/ui_bits.dart';
 
 class TodayScreen extends StatefulWidget {
-  const TodayScreen({super.key});
+  const TodayScreen({super.key, this.isActive = true});
+
+  final bool isActive;
 
   @override
   State<TodayScreen> createState() => _TodayScreenState();
@@ -29,8 +31,19 @@ class _TodayScreenState extends State<TodayScreen> {
     _load();
     _clock = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
-      setState(() => _now = DateTime.now());
+      final now = DateTime.now();
+      final rolled = !DateUtils.isSameDay(_now, now);
+      setState(() => _now = now);
+      if (rolled) _load(silent: true);
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant TodayScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      _load(silent: true);
+    }
   }
 
   @override
@@ -39,16 +52,21 @@ class _TodayScreenState extends State<TodayScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool silent = false}) async {
     if (!mounted) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final res = await ApiClient.instance.getJson('/api/checkin/today');
       if (!mounted) return;
-      setState(() => _data = res['data'] as Map<String, dynamic>);
+      setState(() {
+        _data = res['data'] as Map<String, dynamic>;
+        _error = null;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = formatError(e));
@@ -58,119 +76,16 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   Future<void> _checkin() async {
-    final textCtrl = TextEditingController();
-    XFile? image;
-    Uint8List? previewBytes;
-    final ok = await showModalBottomSheet<bool>(
+    final data = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setLocal) {
-            return Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(color: const Color(0xFFE0D6CC), borderRadius: BorderRadius.circular(4)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text('完成打卡', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 6),
-                  const Text('凭证会发到社区，大家都能看见', style: TextStyle(color: Color(0xFF8A8078))),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: textCtrl,
-                    maxLines: 3,
-                    decoration: const InputDecoration(hintText: '可选：写点完成感受'),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
-                          if (picked == null) return;
-                          final bytes = await picked.readAsBytes();
-                          setLocal(() {
-                            image = picked;
-                            previewBytes = bytes;
-                          });
-                        },
-                        icon: const Icon(Icons.photo_outlined),
-                        label: Text(image == null ? '相册' : '已选图'),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final picked = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
-                          if (picked == null) return;
-                          final bytes = await picked.readAsBytes();
-                          setLocal(() {
-                            image = picked;
-                            previewBytes = bytes;
-                          });
-                        },
-                        icon: const Icon(Icons.photo_camera_outlined),
-                        label: const Text('拍照'),
-                      ),
-                      if (image != null) ...[
-                        const SizedBox(width: 8),
-                        TextButton(
-                          onPressed: () => setLocal(() {
-                            image = null;
-                            previewBytes = null;
-                          }),
-                          child: const Text('清除'),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (previewBytes != null) ...[
-                    const SizedBox(height: 12),
-                    LocalImagePreview(bytes: previewBytes!),
-                  ],
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('提交到社区'),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Center(child: Text('取消')),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      builder: (ctx) => const CheckinProofSheet(),
     );
-    if (ok != true) return;
-    try {
-      final res = await ApiClient.instance.completeCheckin(text: textCtrl.text, image: image);
-      if (!mounted) return;
-      setState(() => _data = res['data'] as Map<String, dynamic>);
-      await _celebrateCheckin(res['data'] as Map<String, dynamic>);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(formatError(e))),
-      );
-    }
+    if (data == null || !mounted) return;
+    setState(() => _data = data);
+    await _celebrateCheckin(data);
   }
 
   Future<void> _celebrateCheckin(Map<String, dynamic> data) async {
@@ -182,32 +97,17 @@ class _TodayScreenState extends State<TodayScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('打卡成功'),
-        content: Text(
-          streak > 1
-              ? '连续 $streak 天！凭证已发到社区。${next != null && next.isNotEmpty ? '\n再坚持 $daysTo 天可解锁「$next」。' : ''}'
-              : '今日任务完成，凭证已发到社区。',
-        ),
+        content: Text(celebrateBody(streak: streak, nextTitle: next, daysToNext: daysTo)),
         actions: [
           FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('好')),
         ],
       ),
     );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('打卡成功，已发到社区')));
   }
 
   DateTime get _deadline {
     final n = _now;
     return DateTime(n.year, n.month, n.day).add(const Duration(days: 1));
-  }
-
-  String _countdownLabel() {
-    final left = _deadline.difference(_now);
-    if (left.isNegative) return '即将结算';
-    final h = left.inHours;
-    final m = left.inMinutes.remainder(60);
-    if (h > 0) return '距结算还剩 $h 小时 $m 分';
-    return '距结算还剩 $m 分钟';
   }
 
   double _titleProgress(Map<String, dynamic> d) {
@@ -320,6 +220,15 @@ class _TodayScreenState extends State<TodayScreen> {
                 ],
               ),
               const SizedBox(height: 16),
+              _WeekStrip(date: d['date']?.toString(), statuses: _weekStatuses(d), completedDays: _weekCompleted(d)),
+              const SizedBox(height: 12),
+              _CirclePulseCard(
+                memberCount: _asInt(d['circleMemberCount']),
+                completedCount: _asInt(d['circleCompletedCount']),
+                names: (d['circleDoneNicknames'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+                iCompleted: completed,
+              ),
+              const SizedBox(height: 16),
               if (!completed && !dormant) ...[
                 Container(
                   width: double.infinity,
@@ -341,8 +250,8 @@ class _TodayScreenState extends State<TodayScreen> {
                       Expanded(
                         child: Text(
                           _now.hour >= 18 && ((d['streakDays'] as num?)?.toInt() ?? 0) > 0
-                              ? '连续即将断开 · ${_countdownLabel()}'
-                              : _countdownLabel(),
+                              ? '连续即将断开 · ${countdownLabel(_now, deadline: _deadline)}'
+                              : countdownLabel(_now, deadline: _deadline),
                           style: const TextStyle(fontWeight: FontWeight.w700, height: 1.35),
                         ),
                       ),
@@ -414,6 +323,13 @@ class _TodayScreenState extends State<TodayScreen> {
                       const SizedBox(height: 12),
                       NetworkImageBox(url: imageFullUrl(d['imageUrl']?.toString())),
                     ],
+                    if (completed && parseCheckedInAt(d['checkedInAt']) != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        '完成于 ${_formatHm(parseCheckedInAt(d['checkedInAt'])!)}',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF8A8078), fontWeight: FontWeight.w600),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -438,6 +354,164 @@ class _TodayScreenState extends State<TodayScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  int _asInt(dynamic v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse(v?.toString() ?? '') ?? 0;
+  }
+
+  int _weekCompleted(Map<String, dynamic> d) {
+    final raw = d['weekCompletedDays'];
+    if (raw is num) return raw.toInt();
+    return _weekStatuses(d).where((s) => s == 'COMPLETED').length;
+  }
+
+  List<String> _weekStatuses(Map<String, dynamic> d) {
+    final raw = d['weekStatuses'];
+    if (raw is List) {
+      return raw.map((e) => e.toString()).toList();
+    }
+    return const [];
+  }
+
+  String _formatHm(DateTime dt) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+}
+
+class _WeekStrip extends StatelessWidget {
+  const _WeekStrip({required this.date, required this.statuses, required this.completedDays});
+  final String? date;
+  final List<String> statuses;
+  final int completedDays;
+
+  @override
+  Widget build(BuildContext context) {
+    final days = statuses.isEmpty ? List<String>.filled(7, 'NONE') : statuses;
+    final today = DateTime.tryParse(date ?? '') ?? DateTime.now();
+    final start = today.subtract(Duration(days: days.length - 1));
+    const labels = ['一', '二', '三', '四', '五', '六', '日'];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE7DDD2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${weekProgressLabel(completedDays)} · 连续会在 0 点结算',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(days.length.clamp(0, 7), (i) {
+              final day = start.add(Duration(days: i));
+              final status = days[i];
+              Color color;
+              switch (status) {
+                case 'COMPLETED':
+                  color = AppColors.moss;
+                  break;
+                case 'MISSED':
+                  color = const Color(0xFFE2C8BC);
+                  break;
+                case 'PENDING':
+                  color = AppColors.gold;
+                  break;
+                default:
+                  color = const Color(0xFFF0EAE3);
+              }
+              return Column(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
+                    child: status == 'COMPLETED'
+                        ? const Icon(Icons.check, size: 16, color: Colors.white)
+                        : Text(
+                            '${day.day}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: status == 'PENDING' ? AppColors.ink : const Color(0xFF8A8078),
+                            ),
+                          ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(labels[(day.weekday - 1).clamp(0, 6)], style: const TextStyle(fontSize: 11, color: Color(0xFF8A8078))),
+                ],
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CirclePulseCard extends StatelessWidget {
+  const _CirclePulseCard({
+    required this.memberCount,
+    required this.completedCount,
+    required this.names,
+    required this.iCompleted,
+  });
+
+  final int memberCount;
+  final int completedCount;
+  final List<String> names;
+  final bool iCompleted;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = memberCount <= 0 ? 0.0 : (completedCount / memberCount).clamp(0.0, 1.0);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE7DDD2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            circlePulseCopy(
+              memberCount: memberCount,
+              completedCount: completedCount,
+              doneNicknames: names,
+              iCompleted: iCompleted,
+            ),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              minHeight: 8,
+              value: progress,
+              backgroundColor: const Color(0xFFF0EAE3),
+              color: AppColors.accent,
+            ),
+          ),
+        ],
       ),
     );
   }
