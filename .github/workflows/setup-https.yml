@@ -475,31 +475,39 @@ jobs:
               sudo rm -f /var/www/certbot/.well-known/acme-challenge/selftest
               
               echo ""
-              echo "Obtaining Let's Encrypt certificate..."
-              echo "USE_STAGING=${USE_STAGING:-«unset»}"
-              CERTBOT_BASE_OPTS="--non-interactive --agree-tos --register-unsafely-without-email"
+              echo "=== STEP: Obtaining Let's Encrypt certificate ==="
+              echo "STEP: checking USE_STAGING value"
+              echo "USE_STAGING=${USE_STAGING:-unset}"
+              echo "DOMAIN=${DOMAIN}"
+              
+              echo "STEP: building certbot command"
+              STAGING_FLAG=""
               if [[ "${USE_STAGING:-false}" == "true" ]]; then
-                CERTBOT_BASE_OPTS="${CERTBOT_BASE_OPTS} --staging"
+                STAGING_FLAG="--staging"
                 echo "Using Let's Encrypt STAGING server"
+              else
+                echo "Using Let's Encrypt PRODUCTION server"
               fi
               
-              # Use webroot method (nginx plugin unreliable with pip install)
-              CERTBOT_CMD="certbot certonly --webroot -w /var/www/certbot -d ${DOMAIN} ${CERTBOT_BASE_OPTS}"
-              if [[ "$HAS_NGINX_PLUGIN" == "true" ]]; then
-                echo "Using certbot nginx plugin..."
-                CERTBOT_CMD="certbot --nginx -d ${DOMAIN} ${CERTBOT_BASE_OPTS}"
-              else
-                echo "Using certbot webroot method..."
-              fi
+              echo "STEP: invoking certbot webroot"
+              echo "Command: certbot certonly --webroot -w /var/www/certbot -d ${DOMAIN} --non-interactive --agree-tos --register-unsafely-without-email ${STAGING_FLAG}"
               
-              echo "Running: $CERTBOT_CMD"
-              if sudo $CERTBOT_CMD; then
-                echo "Certificate obtained successfully!"
-              else
-                CERTBOT_RC=$?
+              sudo certbot certonly \
+                --webroot \
+                -w /var/www/certbot \
+                -d "${DOMAIN}" \
+                --non-interactive \
+                --agree-tos \
+                --register-unsafely-without-email \
+                ${STAGING_FLAG}
+              CERTBOT_RC=$?
+              
+              echo "STEP: certbot finished with exit code ${CERTBOT_RC}"
+              
+              if [[ "${CERTBOT_RC}" -ne 0 ]]; then
                 echo ""
                 echo "=========================================="
-                echo "ERROR: certbot failed with exit code $CERTBOT_RC"
+                echo "ERROR: certbot failed with exit code ${CERTBOT_RC}"
                 echo "=========================================="
                 echo ""
                 echo "--- Last 50 lines of /var/log/letsencrypt/letsencrypt.log ---"
@@ -508,13 +516,15 @@ jobs:
                 echo "--- Possible causes ---"
                 echo "1. Firewall: Ensure TCP 80 is open for ACME challenges"
                 echo "2. Alibaba Cloud WAF/Beaver: May block requests to sslip.io domains"
-                echo "   - Check if you see 'Server: Beaver' or 403 errors in the log"
+                echo "   - Check if you see Server: Beaver or 403 errors in the log"
                 echo "   - Try disabling WAF temporarily or adding sslip.io to whitelist"
                 echo "3. DNS: Ensure ${DOMAIN} resolves correctly from Let's Encrypt servers"
                 echo ""
                 echo "You can retry by running this workflow again after fixing the issue."
                 exit 1
               fi
+              
+              echo "STEP: certificate obtained successfully"
             fi
             
             set -e  # Re-enable exit on error for remaining config steps
