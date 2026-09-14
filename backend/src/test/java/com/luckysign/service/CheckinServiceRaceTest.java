@@ -8,6 +8,7 @@ import com.luckysign.entity.CheckinRecord;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.entity.User;
 import com.luckysign.repository.CheckinRecordRepository;
+import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.DailyDrawRepository;
 import com.luckysign.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -46,6 +48,8 @@ class CheckinServiceRaceTest {
     private FileStorageService fileStorageService;
     @Mock
     private RatingService ratingService;
+    @Mock
+    private CircleMemberRepository circleMemberRepository;
 
     private CheckinService checkinService;
 
@@ -54,7 +58,7 @@ class CheckinServiceRaceTest {
         checkinService = new CheckinService(
                 userRepository, dailyDrawRepository, checkinRecordRepository,
                 pointsService, drawService, titleService, chatService,
-                fileStorageService, ratingService);
+                fileStorageService, ratingService, circleMemberRepository);
     }
 
     @Test
@@ -103,6 +107,8 @@ class CheckinServiceRaceTest {
         when(drawService.ensureDraw(circleId, 1L, today)).thenReturn(draw);
         when(drawService.rewardPoints(draw)).thenReturn(10);
         when(titleService.resolve(anyInt())).thenReturn("签到达人");
+        when(dailyDrawRepository.findByUserIdAndDrawDateGreaterThanEqualOrderByDrawDateDesc(eq(1L), any()))
+                .thenReturn(List.of(draw));
         when(checkinRecordRepository.save(any(CheckinRecord.class))).thenAnswer(inv -> {
             CheckinRecord r = inv.getArgument(0);
             r.setId(100L);
@@ -112,9 +118,27 @@ class CheckinServiceRaceTest {
         var response = checkinService.complete(circleId, 1L, "完成任务", null);
 
         assertNotNull(response);
+        assertEquals(1, response.weekCompletedDays());
         verify(dailyDrawRepository).save(argThat(d -> d.getStatus() == DrawStatus.COMPLETED));
         verify(checkinRecordRepository).save(any(CheckinRecord.class));
         verify(userRepository).save(any(User.class));
+    }
+
+    @Test
+    void completeRejectsEmptyProof() {
+        LocalDate today = LocalDate.now();
+        Long circleId = 5L;
+        User user = createTestUser(1L);
+        DailyDraw draw = createTestDraw(1L, 1L, today, DrawStatus.VIEWED);
+
+        when(drawService.today()).thenReturn(today);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(drawService.ensureDraw(circleId, 1L, today)).thenReturn(draw);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> checkinService.complete(circleId, 1L, "   ", null));
+        assertEquals("请输入打卡内容或上传图片", ex.getMessage());
+        verify(checkinRecordRepository, never()).save(any());
     }
 
     @Test

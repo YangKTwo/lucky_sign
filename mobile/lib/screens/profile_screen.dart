@@ -9,7 +9,9 @@ import '../utils/errors.dart';
 import '../widgets/ui_bits.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.isActive = true});
+
+  final bool isActive;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -26,6 +28,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant ProfileScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -708,8 +718,8 @@ class _PasswordSheetState extends State<_PasswordSheet> {
       setState(() => _error = '请填写完整');
       return;
     }
-    if (newP.length < 6) {
-      setState(() => _error = '新密码至少 6 位');
+    if (newP.length < 8) {
+      setState(() => _error = '新密码至少 8 位');
       return;
     }
     if (newP != _confirm.text) {
