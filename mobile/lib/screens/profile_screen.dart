@@ -136,9 +136,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => const _PasswordSheet(),
     );
-    if (ok == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密码已更新')));
-    }
+    if (ok != true || !mounted) return;
+    await logoutAndGoLogin(context, askConfirm: false);
+    rootScaffoldMessengerKey.currentState?.showSnackBar(
+      const SnackBar(content: Text('密码已更新，请重新登录')),
+    );
   }
 
   @override
@@ -708,8 +710,8 @@ class _PasswordSheetState extends State<_PasswordSheet> {
       setState(() => _error = '请填写完整');
       return;
     }
-    if (newP.length < 6) {
-      setState(() => _error = '新密码至少 6 位');
+    if (newP.length < 8) {
+      setState(() => _error = '新密码至少 8 位');
       return;
     }
     if (newP != _confirm.text) {
