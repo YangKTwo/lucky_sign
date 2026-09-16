@@ -36,6 +36,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _membersError;
   int? _myUserId;
   String? _myNickname;
+  String? _myAvatarUrl;
   bool _showMentionPicker = false;
   String _mentionQuery = '';
   int _atStart = -1;
@@ -82,6 +83,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (_nearBottom) {
         _markVisibleAsRead();
       }
+      _refreshLiveAvatars();
     }
   }
 
@@ -93,13 +95,16 @@ class _ChatScreenState extends State<ChatScreen> {
       final id = data?['id'];
       final parsed = id is int ? id : (id is num ? id.toInt() : null);
       final nick = data?['nickname']?.toString();
+      final avatar = data?['avatarUrl']?.toString();
       if (parsed != null) {
         await ApiClient.instance.saveUserId(parsed);
       }
       setState(() {
         if (parsed != null) _myUserId = parsed;
         if (nick != null && nick.isNotEmpty) _myNickname = nick;
+        _myAvatarUrl = avatar;
       });
+      _applyLiveAvatarsToItems();
     } catch (e) {
       debugPrint('ensureMyUserId failed: $e');
     }
@@ -120,6 +125,44 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       setState(() => _membersError = formatError(e));
     }
+  }
+
+  Future<void> _refreshLiveAvatars() async {
+    await Future.wait([
+      _ensureMyUserId(),
+      _loadMembers(),
+    ]);
+    if (!mounted) return;
+    _applyLiveAvatarsToItems();
+  }
+
+  /// History/WS payloads snapshot avatarUrl; keep on-screen bubbles in sync with live profiles.
+  void _applyLiveAvatarsToItems() {
+    if (_items.isEmpty) return;
+    final avatars = <int, String?>{};
+    if (_myUserId != null) {
+      avatars[_myUserId!] = _myAvatarUrl;
+    }
+    for (final m in _members) {
+      final id = _asInt(m['userId']);
+      if (id == null) continue;
+      avatars[id] = m['avatarUrl']?.toString();
+    }
+    if (avatars.isEmpty) return;
+
+    var changed = false;
+    for (var i = 0; i < _items.length; i++) {
+      final uid = _asInt(_items[i]['userId']);
+      if (uid == null || !avatars.containsKey(uid)) continue;
+      final nextUrl = avatars[uid];
+      if (_items[i]['avatarUrl']?.toString() == nextUrl) continue;
+      _items[i] = {
+        ..._items[i],
+        'avatarUrl': nextUrl,
+      };
+      changed = true;
+    }
+    if (changed && mounted) setState(() {});
   }
 
   void _upsertMessage(Map<String, dynamic> msg) {

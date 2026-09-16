@@ -95,6 +95,7 @@ class UserAvatar extends StatelessWidget {
       child: ClipOval(
         child: Image.network(
           url,
+          key: ValueKey(url),
           width: radius * 2,
           height: radius * 2,
           fit: BoxFit.cover,
