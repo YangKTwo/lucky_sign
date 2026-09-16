@@ -57,4 +57,7 @@ public class AuthDtos {
             @NotBlank String refreshToken
     ) {
     }
+
+    public record RegisterResponse(boolean pending, String message) {
+    }
 }

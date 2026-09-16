@@ -82,6 +82,8 @@ public class DataSeeder implements CommandLineRunner {
             u.setRole(UserRole.ADMIN);
             u.setTitle(titleService.resolve(0));
             u.setTag(UserTag.NONE);
+            u.setEnabled(true);
+            u.setApprovalStatus(AccountStatus.ACTIVE);
             return userRepository.save(u);
         });
 

@@ -2,12 +2,11 @@ package com.luckysign.service;
 
 import com.luckysign.common.BizException;
 import com.luckysign.common.InviteCodes;
-import com.luckysign.domain.MemberRole;
+import com.luckysign.domain.AccountStatus;
 import com.luckysign.domain.UserRole;
 import com.luckysign.domain.UserTag;
 import com.luckysign.dto.AuthDtos;
 import com.luckysign.entity.Circle;
-import com.luckysign.entity.CircleMember;
 import com.luckysign.entity.User;
 import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.CircleRepository;
@@ -42,7 +41,7 @@ public class AuthService {
     }
 
     @Transactional
-    public AuthDtos.AuthResponse register(AuthDtos.RegisterRequest req) {
+    public AuthDtos.RegisterResponse register(AuthDtos.RegisterRequest req) {
         String email = normalizeEmail(req.email());
         String nickname = req.nickname() == null ? "" : req.nickname().trim();
         if (nickname.isEmpty()) {
@@ -73,37 +72,12 @@ public class AuthService {
         user.setRole(UserRole.USER);
         user.setTag(UserTag.NONE);
         user.setTokenVersion(0L);
-        user.setEnabled(true);
-        user = userRepository.save(user);
+        user.setEnabled(false);
+        user.setApprovalStatus(AccountStatus.PENDING);
+        user.setPendingCircleId(circle.getId());
+        userRepository.save(user);
 
-        boolean membershipCreated = false;
-        try {
-            if (!circleMemberRepository.existsByCircleIdAndUserId(circle.getId(), user.getId())) {
-                int updated = circleRepository.incrementMemberCount(circle.getId());
-                if (updated == 0) {
-                    throw new BizException("圈子已满员");
-                }
-                CircleMember member = new CircleMember();
-                member.setCircleId(circle.getId());
-                member.setUserId(user.getId());
-                member.setRole(MemberRole.MEMBER);
-                circleMemberRepository.save(member);
-                membershipCreated = true;
-            } else {
-                membershipCreated = true;
-            }
-        } catch (org.springframework.dao.DataIntegrityViolationException e) {
-            circleRepository.decrementMemberCount(circle.getId());
-            if (circleMemberRepository.existsByCircleIdAndUserId(circle.getId(), user.getId())) {
-                membershipCreated = true;
-            }
-        }
-
-        if (!membershipCreated) {
-            throw new BizException("加入圈子失败，请稍后重试");
-        }
-
-        return generateAuthResponse(user, circle.getId());
+        return new AuthDtos.RegisterResponse(true, "已提交注册，请等待管理员通过后再登录");
     }
 
     public AuthDtos.AuthResponse login(AuthDtos.LoginRequest req) {
@@ -113,12 +87,10 @@ public class AuthService {
         }
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new BizException("邮箱或密码错误"));
-        if (!Boolean.TRUE.equals(user.getEnabled())) {
-            throw new BizException("账号已禁用");
-        }
         if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
             throw new BizException("邮箱或密码错误");
         }
+        assertCanAuthenticate(user);
         Long circleId = circleMemberRepository.findFirstCircleIdByUserId(user.getId()).orElse(null);
         return generateAuthResponse(user, circleId);
     }
@@ -141,9 +113,7 @@ public class AuthService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BizException("用户不存在"));
 
-        if (!Boolean.TRUE.equals(user.getEnabled())) {
-            throw new BizException("账号已禁用");
-        }
+        assertCanAuthenticate(user);
 
         Long tokenVer = jwtService.getTokenVersion(claims);
         if (tokenVer != null && !tokenVer.equals(user.getTokenVersion())) {
@@ -205,6 +175,18 @@ public class AuthService {
         User user = userRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
         user.setAvatarUrl(avatarUrl);
         return toProfile(userRepository.save(user));
+    }
+
+    static void assertCanAuthenticate(User user) {
+        if (user.getApprovalStatus() == AccountStatus.PENDING) {
+            throw new BizException("账号待管理员审核，通过后再登录");
+        }
+        if (user.getApprovalStatus() == AccountStatus.REJECTED) {
+            throw new BizException("注册未通过");
+        }
+        if (!Boolean.TRUE.equals(user.getEnabled())) {
+            throw new BizException("账号已禁用");
+        }
     }
 
     public static AuthDtos.UserProfileResponse toProfile(User user) {

@@ -23,7 +23,7 @@ public class AuthController {
     }
 
     @PostMapping("/auth/register")
-    public ApiResponse<AuthDtos.AuthResponse> register(@Valid @RequestBody AuthDtos.RegisterRequest request) {
+    public ApiResponse<AuthDtos.RegisterResponse> register(@Valid @RequestBody AuthDtos.RegisterRequest request) {
         return ApiResponse.ok(authService.register(request));
     }
 

@@ -1,5 +1,6 @@
 package com.luckysign.entity;
 
+import com.luckysign.domain.AccountStatus;
 import com.luckysign.domain.UserRole;
 import com.luckysign.domain.UserTag;
 import jakarta.persistence.*;
@@ -60,6 +61,12 @@ public class User {
 
     @Column(nullable = false)
     private Boolean enabled = true;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private AccountStatus approvalStatus = AccountStatus.ACTIVE;
+
+    private Long pendingCircleId;
 
     @Column(nullable = false)
     private Instant createdAt = Instant.now();

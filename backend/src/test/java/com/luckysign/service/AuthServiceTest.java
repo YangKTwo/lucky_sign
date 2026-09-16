@@ -1,12 +1,11 @@
 package com.luckysign.service;
 
 import com.luckysign.common.BizException;
-import com.luckysign.domain.MemberRole;
+import com.luckysign.domain.AccountStatus;
 import com.luckysign.domain.UserRole;
 import com.luckysign.domain.UserTag;
 import com.luckysign.dto.AuthDtos;
 import com.luckysign.entity.Circle;
-import com.luckysign.entity.CircleMember;
 import com.luckysign.entity.User;
 import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.CircleRepository;
@@ -87,34 +86,38 @@ class AuthServiceTest {
     }
 
     @Test
-    void registerJoinsCircleWithInvite() {
+    void registerCreatesPendingAccountWithoutLogin() {
         Circle circle = new Circle();
         circle.setId(1L);
         circle.setInviteCode("ABCDEF");
         circle.setMaxMembers(10);
         circle.setMemberCount(3);
-        User saved = createTestUser(9L);
 
         when(userRepository.existsByEmail("a@b.com")).thenReturn(false);
         when(circleRepository.findByInviteCode("ABCDEF")).thenReturn(Optional.of(circle));
         when(titleService.resolve(0)).thenReturn("签到萌新");
         when(passwordEncoder.encode("12345678")).thenReturn("hash");
-        when(userRepository.save(any(User.class))).thenReturn(saved);
-        when(circleMemberRepository.existsByCircleIdAndUserId(1L, 9L)).thenReturn(false);
-        when(circleRepository.incrementMemberCount(1L)).thenReturn(1);
-        when(jwtService.generateAccessToken(eq(9L), eq("a@b.com"), eq(0L))).thenReturn("access-token");
-        when(jwtService.generateRefreshToken(eq(9L), eq(0L))).thenReturn("refresh-token");
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> {
+            User u = inv.getArgument(0);
+            u.setId(9L);
+            return u;
+        });
 
         AuthDtos.RegisterRequest req = new AuthDtos.RegisterRequest("小明", "a@b.com", "12345678", "ab cdef");
-        AuthDtos.AuthResponse res = authService.register(req);
-        assertEquals("access-token", res.token());
-        assertEquals("refresh-token", res.refreshToken());
-        assertEquals(1L, res.circleId());
+        AuthDtos.RegisterResponse res = authService.register(req);
 
-        ArgumentCaptor<CircleMember> member = ArgumentCaptor.forClass(CircleMember.class);
-        verify(circleMemberRepository).save(member.capture());
-        assertEquals(MemberRole.MEMBER, member.getValue().getRole());
-        verify(circleRepository).incrementMemberCount(1L);
+        assertTrue(res.pending());
+        assertTrue(res.message().contains("管理员"));
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(userCaptor.capture());
+        User saved = userCaptor.getValue();
+        assertEquals(AccountStatus.PENDING, saved.getApprovalStatus());
+        assertEquals(Boolean.FALSE, saved.getEnabled());
+        assertEquals(1L, saved.getPendingCircleId());
+        verify(circleMemberRepository, never()).save(any());
+        verify(circleRepository, never()).incrementMemberCount(anyLong());
+        verify(jwtService, never()).generateAccessToken(anyLong(), anyString(), anyLong());
     }
 
     @Test
@@ -122,10 +125,25 @@ class AuthServiceTest {
         User user = createTestUser(1L);
         user.setEnabled(false);
         when(userRepository.findByEmail("a@b.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("12345678", "hash")).thenReturn(true);
 
         AuthDtos.LoginRequest req = new AuthDtos.LoginRequest("a@b.com", "12345678");
         BizException ex = assertThrows(BizException.class, () -> authService.login(req));
         assertEquals("账号已禁用", ex.getMessage());
+    }
+
+    @Test
+    void loginRejectsPendingUser() {
+        User user = createTestUser(1L);
+        user.setEnabled(false);
+        user.setApprovalStatus(AccountStatus.PENDING);
+        when(userRepository.findByEmail("a@b.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("12345678", "hash")).thenReturn(true);
+
+        AuthDtos.LoginRequest req = new AuthDtos.LoginRequest("a@b.com", "12345678");
+        BizException ex = assertThrows(BizException.class, () -> authService.login(req));
+        assertEquals("账号待管理员审核，通过后再登录", ex.getMessage());
+        verify(jwtService, never()).generateAccessToken(anyLong(), anyString(), anyLong());
     }
 
     @Test
@@ -186,6 +204,7 @@ class AuthServiceTest {
         user.setTotalCompletedDays(0);
         user.setTokenVersion(0L);
         user.setEnabled(true);
+        user.setApprovalStatus(AccountStatus.ACTIVE);
         return user;
     }
 }

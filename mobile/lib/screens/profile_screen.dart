@@ -143,6 +143,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<void> _openApprovals() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => const _ApprovalSheet(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = _profile;
@@ -210,6 +222,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 subtitle: '需要验证当前密码',
                 onTap: _changePassword,
               ),
+              if (p['role']?.toString() == 'ADMIN') ...[
+                const SizedBox(height: 10),
+                SettingsTile(
+                  icon: Icons.how_to_reg_outlined,
+                  title: '注册审批',
+                  subtitle: '通过后对方才能登录',
+                  onTap: _openApprovals,
+                ),
+              ],
               const SizedBox(height: 10),
               _FeedbackEntry(onTap: _openFeedback),
               const SizedBox(height: 28),
@@ -796,3 +817,166 @@ class _PasswordSheetState extends State<_PasswordSheet> {
     );
   }
 }
+
+class _ApprovalSheet extends StatefulWidget {
+  const _ApprovalSheet();
+
+  @override
+  State<_ApprovalSheet> createState() => _ApprovalSheetState();
+}
+
+class _ApprovalSheetState extends State<_ApprovalSheet> {
+  List<Map<String, dynamic>> _users = [];
+  String? _error;
+  bool _loading = true;
+  final _busy = <int>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final res = await ApiClient.instance.getJson('/api/admin/registrations');
+      if (!mounted) return;
+      final list = (res['data']?['users'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+      setState(() {
+        _users = list;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = formatError(e);
+        _loading = false;
+      });
+    }
+  }
+
+  int? _idOf(Map<String, dynamic> u) {
+    final id = u['id'];
+    if (id is int) return id;
+    if (id is num) return id.toInt();
+    return int.tryParse(id?.toString() ?? '');
+  }
+
+  Future<void> _decide(Map<String, dynamic> user, {required bool approve}) async {
+    final id = _idOf(user);
+    if (id == null || _busy.contains(id)) return;
+    setState(() => _busy.add(id));
+    try {
+      final path = approve
+          ? '/api/admin/registrations/$id/approve'
+          : '/api/admin/registrations/$id/reject';
+      await ApiClient.instance.postJson(path, {});
+      if (!mounted) return;
+      setState(() {
+        _users.removeWhere((e) => _idOf(e) == id);
+        _busy.remove(id);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(approve ? '已通过，对方可以登录了' : '已拒绝该注册')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy.remove(id));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(formatError(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final safe = MediaQuery.paddingOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 10, 20, 16 + bottom + safe),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(color: const Color(0xFFE0D6CC), borderRadius: BorderRadius.circular(4)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('注册审批', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          const Text('通过后才会加入圈子并允许登录', style: TextStyle(fontSize: 13, color: Color(0xFF8A8078))),
+          const SizedBox(height: 14),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null)
+            ErrorRetry(message: _error!, onRetry: _load)
+          else if (_users.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 36),
+              child: Center(child: Text('暂无待审批注册', style: TextStyle(color: Color(0xFF8A8078)))),
+            )
+          else
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.5),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: _users.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (_, i) {
+                  final u = _users[i];
+                  final id = _idOf(u);
+                  final busy = id != null && _busy.contains(id);
+                  return Container(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE7DDD2)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                u['nickname']?.toString() ?? '',
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                u['email']?.toString() ?? '',
+                                style: const TextStyle(fontSize: 13, color: Color(0xFF8A8078)),
+                              ),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: busy ? null : () => _decide(u, approve: false),
+                          child: const Text('拒绝'),
+                        ),
+                        FilledButton(
+                          onPressed: busy ? null : () => _decide(u, approve: true),
+                          style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
+                          child: Text(busy ? '…' : '通过'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+

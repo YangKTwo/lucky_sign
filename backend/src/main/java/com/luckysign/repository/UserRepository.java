@@ -1,5 +1,6 @@
 package com.luckysign.repository;
 
+import com.luckysign.domain.AccountStatus;
 import com.luckysign.domain.UserRole;
 import com.luckysign.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -14,6 +15,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmail(String email);
     boolean existsByEmail(String email);
     List<User> findByTagNot(com.luckysign.domain.UserTag tag);
+
+    List<User> findByApprovalStatusOrderByCreatedAtAsc(AccountStatus approvalStatus);
+
+    long countByApprovalStatus(AccountStatus approvalStatus);
 
     @Query("SELECT u.tokenVersion FROM User u WHERE u.id = :userId")
     Optional<Long> findTokenVersionById(@Param("userId") Long userId);

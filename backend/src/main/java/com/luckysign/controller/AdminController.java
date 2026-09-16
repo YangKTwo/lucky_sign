@@ -1,6 +1,7 @@
 package com.luckysign.controller;
 
 import com.luckysign.common.ApiResponse;
+import com.luckysign.dto.AdminDtos;
 import com.luckysign.dto.AuthDtos;
 import com.luckysign.dto.FeedbackDtos;
 import com.luckysign.service.AdminService;
@@ -25,6 +26,22 @@ public class AdminController {
     @PostMapping("/users/{userId}/unlock")
     public ApiResponse<AuthDtos.UserProfileResponse> unlock(@PathVariable Long userId) {
         return ApiResponse.ok(adminService.unlock(userId));
+    }
+
+    @GetMapping("/registrations")
+    public ApiResponse<AdminDtos.PendingListResponse> pendingRegistrations() {
+        return ApiResponse.ok(adminService.pendingRegistrations());
+    }
+
+    @PostMapping("/registrations/{userId}/approve")
+    public ApiResponse<AuthDtos.UserProfileResponse> approve(@PathVariable Long userId) {
+        return ApiResponse.ok(adminService.approveRegistration(userId));
+    }
+
+    @PostMapping("/registrations/{userId}/reject")
+    public ApiResponse<Void> reject(@PathVariable Long userId) {
+        adminService.rejectRegistration(userId);
+        return ApiResponse.okMessage("已拒绝该注册");
     }
 
     @GetMapping("/feedbacks")

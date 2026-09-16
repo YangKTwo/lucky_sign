@@ -71,6 +71,18 @@ class _LoginScreenState extends State<LoginScreen> {
       if (data == null) {
         throw Exception('登录响应异常，请稍后重试');
       }
+      if (_registerMode) {
+        await ApiClient.instance.saveLastEmail(_email.text.trim());
+        if (!mounted) return;
+        setState(() {
+          _registerMode = false;
+          _error = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message']?.toString() ?? '已提交注册，请等待管理员通过后再登录')),
+        );
+        return;
+      }
       final token = data['token'] as String?;
       if (token == null || token.isEmpty) {
         throw Exception('未拿到登录凭证，请重试');
@@ -139,7 +151,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  _registerMode ? '填写邀请码加入小圈子' : '每天一签，完成任务攒积分',
+                  _registerMode ? '提交后需管理员通过才能登录' : '每天一签，完成任务攒积分',
                   style: const TextStyle(fontSize: 15, color: Color(0xFF7A7068)),
                 ),
                 const SizedBox(height: 28),
@@ -273,7 +285,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
                           onPressed: _loading ? null : _submit,
-                          child: Text(_loading ? '请稍候…' : (_registerMode ? '加入圈子' : '进入今日')),
+                          child: Text(_loading ? '请稍候…' : (_registerMode ? '提交注册' : '进入今日')),
                         ),
                       ),
                       TextButton(

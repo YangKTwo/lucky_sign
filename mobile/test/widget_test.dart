@@ -24,5 +24,6 @@ void main() {
     await tester.pump();
     expect(find.text('邀请码'), findsOneWidget);
     expect(find.textContaining('邀请码'), findsWidgets);
+    expect(find.text('提交注册'), findsOneWidget);
   });
 }
