@@ -23,39 +23,88 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           set -euo pipefail
-          
-          # Determine API_BASE: prefer PUBLIC_API_BASE variable, else derive from DEPLOY_HOST
+
+          is_ipv4() {
+            [[ "${1:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          }
+
+          # 119-23-45-226.sslip.io -> 119.23.45.226
+          sslip_to_ip() {
+            local host="${1:-}"
+            host="${host#https://}"
+            host="${host#http://}"
+            host="${host#wss://}"
+            host="${host#ws://}"
+            host="${host%%/*}"
+            if [[ "$host" =~ ^([0-9]+)-([0-9]+)-([0-9]+)-([0-9]+)\.sslip\.io$ ]]; then
+              echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.${BASH_REMATCH[4]}"
+            fi
+          }
+
+          http_base_from_host() {
+            local host="${1:-}"
+            if is_ipv4 "$host"; then
+              echo "http://${host}"
+            elif [[ -n "$(sslip_to_ip "$host")" ]]; then
+              echo "http://$(sslip_to_ip "$host")"
+            elif [[ -n "$host" ]]; then
+              echo "https://${host}"
+            fi
+          }
+
           if [[ -n "${PUBLIC_API_BASE:-}" ]]; then
             API_BASE="$PUBLIC_API_BASE"
           elif [[ -n "${DEPLOY_HOST:-}" ]]; then
-            API_BASE="https://${DEPLOY_HOST}"
+            API_BASE="$(http_base_from_host "$DEPLOY_HOST")"
           else
             echo "::error::Neither PUBLIC_API_BASE variable nor DEPLOY_HOST secret is set"
             exit 1
           fi
-          
-          # Determine WS_BASE: prefer PUBLIC_WS_BASE variable, else derive from DEPLOY_HOST
+
           if [[ -n "${PUBLIC_WS_BASE:-}" ]]; then
             WS_BASE="$PUBLIC_WS_BASE"
           elif [[ -n "${DEPLOY_HOST:-}" ]]; then
-            WS_BASE="wss://${DEPLOY_HOST}/ws"
+            local_http="$(http_base_from_host "$DEPLOY_HOST")"
+            if [[ "$local_http" == http://* ]]; then
+              WS_BASE="ws://${local_http#http://}/ws"
+            else
+              WS_BASE="wss://${DEPLOY_HOST}/ws"
+            fi
           else
             echo "::error::Neither PUBLIC_WS_BASE variable nor DEPLOY_HOST secret is set"
             exit 1
           fi
-          
-          # Validate https:// prefix for API_BASE (no cleartext http in release)
-          if [[ ! "$API_BASE" =~ ^https:// ]]; then
-            echo "::error::API_BASE must use https:// (got: $API_BASE)"
+
+          # Aliyun Beaver returns 403 for unfiled sslip.io hosts — bake the origin IP instead.
+          API_SSLIP_IP="$(sslip_to_ip "$API_BASE" || true)"
+          if [[ -n "$API_SSLIP_IP" ]]; then
+            echo "::warning::sslip.io is blocked by Aliyun ICP WAF; using http://${API_SSLIP_IP}"
+            API_BASE="http://${API_SSLIP_IP}"
+          fi
+          WS_SSLIP_IP="$(sslip_to_ip "$WS_BASE" || true)"
+          if [[ -n "$WS_SSLIP_IP" ]]; then
+            echo "::warning::sslip.io is blocked by Aliyun ICP WAF; using ws://${WS_SSLIP_IP}/ws"
+            WS_BASE="ws://${WS_SSLIP_IP}/ws"
+          fi
+
+          if [[ "$API_BASE" =~ ^https:// ]]; then
+            :
+          elif [[ "$API_BASE" =~ ^http://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::warning::Release APK uses cleartext HTTP to IPv4 (no domain/ICP yet)"
+          else
+            echo "::error::API_BASE must be https://... or http://<ipv4> (got: $API_BASE)"
             exit 1
           fi
-          
-          # Validate wss:// prefix for WS_BASE (no cleartext ws in release)
-          if [[ ! "$WS_BASE" =~ ^wss:// ]]; then
-            echo "::error::WS_BASE must use wss:// (got: $WS_BASE)"
+
+          if [[ "$WS_BASE" =~ ^wss:// ]]; then
+            :
+          elif [[ "$WS_BASE" =~ ^ws://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ws$ ]]; then
+            echo "::warning::Release APK uses cleartext WS to IPv4 (no domain/ICP yet)"
+          else
+            echo "::error::WS_BASE must be wss://.../ws or ws://<ipv4>/ws (got: $WS_BASE)"
             exit 1
           fi
-          
+
           echo "api_base=${API_BASE}" >> "$GITHUB_OUTPUT"
           echo "ws_base=${WS_BASE}" >> "$GITHUB_OUTPUT"
           echo "✓ API_BASE=${API_BASE}"

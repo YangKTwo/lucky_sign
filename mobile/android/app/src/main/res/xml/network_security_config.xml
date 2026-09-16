@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Temporary: production is a bare IPv4 without a filed domain / matching TLS cert.
+  Aliyun Beaver blocks sslip.io (ICP). Allow HTTP until a real HTTPS domain is live,
+  then set cleartextTrafficPermitted back to false.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>
