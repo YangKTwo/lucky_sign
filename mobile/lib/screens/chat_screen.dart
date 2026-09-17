@@ -89,6 +89,22 @@ class _ChatScreenState extends State<ChatScreen> {
       _refreshLiveAvatars();
       // Soft refresh history only when cache is stale; WS already covers live inserts.
       _softReloadHistory();
+      final mentionCount = ChatInbox.instance.mentionIds.value.length;
+      if (mentionCount > 0) {
+        rootScaffoldMessengerKey.currentState
+          ?..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(mentionCount == 1 ? '有人 @了你' : '有 $mentionCount 条消息 @了你'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: '查看',
+                onPressed: _jumpToOldestUnreadOrMention,
+              ),
+            ),
+          );
+      }
     }
   }
 
@@ -382,7 +398,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ChatInbox.instance.remove(id);
     }
     if (mounted) setState(() {});
-    Future<void>.delayed(const Duration(milliseconds: 1200), () {
+    Future<void>.delayed(const Duration(milliseconds: 2200), () {
       if (mounted && _highlightId == id) {
         setState(() => _highlightId = null);
       }
@@ -644,12 +660,14 @@ class _ChatScreenState extends State<ChatScreen> {
     return !_sameDay(cur, _createdAt(_items[index - 1]));
   }
 
-  /// 列表里「以下为新消息」插在第一条仍未读的消息前。
+  /// 列表里「以下为新消息 / @你」插在第一条仍未读或 mention 的消息前。
   bool _shouldShowUnreadDivider(int index) {
     final firstId = ChatInbox.instance.oldestMention ?? ChatInbox.instance.oldestUnread;
     if (firstId == null) return false;
     return _asInt(_items[index]['id']) == firstId;
   }
+
+  bool get _dividerIsMention => ChatInbox.instance.oldestMention != null;
 
   List<String> get _highlightNames {
     final names = <String>[..._assistantNames];
@@ -663,6 +681,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _richContent(String content, {required bool mine}) {
     final names = _highlightNames;
+    final myNick = _myNickname?.trim();
     if (names.isEmpty || !content.contains('@')) {
       return Text(
         content,
@@ -678,12 +697,14 @@ class _ChatScreenState extends State<ChatScreen> {
         for (final name in names) {
           final token = '@$name';
           if (content.startsWith(token, i)) {
+            final isMe = myNick != null && myNick.isNotEmpty && name == myNick;
             spans.add(TextSpan(
               text: token,
-              style: const TextStyle(
+              style: TextStyle(
                 height: 1.35,
-                color: Color(0xFF2F6BFF),
-                fontWeight: FontWeight.w700,
+                color: isMe ? const Color(0xFFB86A00) : const Color(0xFF2F6BFF),
+                fontWeight: FontWeight.w800,
+                backgroundColor: isMe ? const Color(0xFFFFE08A) : null,
               ),
             ));
             i += token.length;
@@ -733,9 +754,9 @@ class _ChatScreenState extends State<ChatScreen> {
             ? (count == 1 ? '↑ 有人@我' : '↑ 有人@我 · $count')
             : (count > 99 ? '↑ 99+ 条未读' : '↑ $count 条未读');
         return Material(
-          color: isMention ? const Color(0xFFFFF3D6) : Colors.white,
-          elevation: 3,
-          shadowColor: const Color(0x33000000),
+          color: isMention ? const Color(0xFFFF8A00) : Colors.white,
+          elevation: isMention ? 6 : 3,
+          shadowColor: isMention ? const Color(0x66FF8A00) : const Color(0x33000000),
           borderRadius: BorderRadius.circular(22),
           child: InkWell(
             onTap: _jumpToOldestUnreadOrMention,
@@ -748,15 +769,15 @@ class _ChatScreenState extends State<ChatScreen> {
                   Icon(
                     isMention ? Icons.alternate_email : Icons.keyboard_arrow_up_rounded,
                     size: 18,
-                    color: isMention ? const Color(0xFFB86A00) : const Color(0xFF2F6BFF),
+                    color: isMention ? Colors.white : const Color(0xFF2F6BFF),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 6),
                   Text(
                     label,
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 13,
-                      color: isMention ? const Color(0xFFB86A00) : const Color(0xFF2F6BFF),
+                      color: isMention ? Colors.white : const Color(0xFF2F6BFF),
                     ),
                   ),
                 ],
@@ -892,7 +913,8 @@ class _ChatScreenState extends State<ChatScreen> {
                             child: Column(
                               children: [
                                 if (_shouldShowDateHeader(msgIndex)) _DateSeparator(label: _formatDateLabel(_createdAt(m))),
-                                if (_shouldShowUnreadDivider(msgIndex)) const _UnreadDivider(),
+                                if (_shouldShowUnreadDivider(msgIndex))
+                                  _UnreadDivider(label: _dividerIsMention ? '有人 @了你' : '以下为新消息'),
                                 _bubble(m),
                               ],
                             ),
@@ -1063,12 +1085,14 @@ class _ChatScreenState extends State<ChatScreen> {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: highlighted
-                ? const Color(0xFFFFF0C8)
-                : (mine
-                    ? (checkin ? const Color(0xFFFFF3D6) : const Color(0xFFFFE8D6))
-                    : (assistant
-                        ? const Color(0xFFEEF0FF)
-                        : (checkin ? const Color(0xFFFFF3D6) : Colors.white))),
+                ? const Color(0xFFFFE08A)
+                : (mentionedMe
+                    ? const Color(0xFFFFF6E0)
+                    : (mine
+                        ? (checkin ? const Color(0xFFFFF3D6) : const Color(0xFFFFE8D6))
+                        : (assistant
+                            ? const Color(0xFFEEF0FF)
+                            : (checkin ? const Color(0xFFFFF3D6) : Colors.white)))),
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(mine ? 16 : 4),
               topRight: Radius.circular(mine ? 4 : 16),
@@ -1076,21 +1100,49 @@ class _ChatScreenState extends State<ChatScreen> {
               bottomRight: const Radius.circular(16),
             ),
             border: Border.all(
-              color: mentionedMe
-                  ? const Color(0xFFFFB020)
-                  : (highlighted
-                      ? const Color(0xFFE8A838)
+              color: highlighted
+                  ? const Color(0xFFFF8A00)
+                  : (mentionedMe
+                      ? const Color(0xFFFFB020)
                       : (mine
                           ? (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE8B48A))
                           : (assistant
                               ? const Color(0xFFC9D0FF)
                               : (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE7DDD2))))),
-              width: mentionedMe || highlighted ? 1.5 : 1,
+              width: highlighted ? 2.5 : (mentionedMe ? 2 : 1),
             ),
+            boxShadow: highlighted || mentionedMe
+                ? [
+                    BoxShadow(
+                      color: Color(highlighted ? 0x66FF8A00 : 0x33FFB020),
+                      blurRadius: highlighted ? 14 : 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
           child: Column(
             crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
+              if (mentionedMe && !mine) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF8A00),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    '提到了你',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               if (checkin) const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
               if (assistant)
                 Text('🤖 $displayName',
@@ -1215,27 +1267,35 @@ class _DateSeparator extends StatelessWidget {
 }
 
 class _UnreadDivider extends StatelessWidget {
-  const _UnreadDivider();
+  const _UnreadDivider({this.label = '以下为新消息'});
+
+  final String label;
 
   @override
   Widget build(BuildContext context) {
+    final isMention = label.contains('@');
+    final color = isMention ? const Color(0xFFFF8A00) : const Color(0xFFE8A838);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 14),
       child: Row(
         children: [
-          const Expanded(child: Divider(color: Color(0xFFE8A838), thickness: 1)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+          Expanded(child: Divider(color: color, thickness: isMention ? 1.5 : 1)),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: isMention ? const Color(0xFFFF8A00) : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: Text(
-              '以下为新消息',
+              label,
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
-                color: Colors.orange.shade800,
+                color: isMention ? Colors.white : Colors.orange.shade800,
               ),
             ),
           ),
-          const Expanded(child: Divider(color: Color(0xFFE8A838), thickness: 1)),
+          Expanded(child: Divider(color: color, thickness: isMention ? 1.5 : 1)),
         ],
       ),
     );
