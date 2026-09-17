@@ -15,16 +15,17 @@ const String _unset = '__unset__';
 String get apiBaseUrl {
   const fromEnv = String.fromEnvironment('API_BASE', defaultValue: _unset);
   if (fromEnv != _unset) return fromEnv;
-  if (kIsWeb) return '';
+  // Debug (incl. Chrome): talk to local Spring Boot. Release Web stays same-origin.
   if (kDebugMode) return 'http://localhost:8080';
+  if (kIsWeb) return '';
   throw StateError('API_BASE must be set for release builds via --dart-define=API_BASE=https://...');
 }
 
 String get wsBaseUrl {
   const fromEnv = String.fromEnvironment('WS_BASE', defaultValue: _unset);
   if (fromEnv != _unset) return fromEnv;
-  if (kIsWeb) return _wsFromPageOrigin();
   if (kDebugMode) return 'ws://localhost:8080/ws';
+  if (kIsWeb) return _wsFromPageOrigin();
   throw StateError('WS_BASE must be set for release builds via --dart-define=WS_BASE=wss://...');
 }
 
