@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config.dart';
 
+/// 由 main 注册：刷新失败后清会话并跳转登录。
+typedef SessionExpiredCallback = Future<void> Function();
+
+class SessionExpiredException implements Exception {
+  @override
+  String toString() => '登录已过期，请重新登录';
+}
+
 class ApiClient {
   ApiClient._();
   static final ApiClient instance = ApiClient._();
@@ -17,7 +26,9 @@ class ApiClient {
   String? _refreshToken;
   int? _userId;
   int? _circleId;
-  bool _isRefreshing = false;
+  Completer<bool>? _refreshCompleter;
+  SessionExpiredCallback? onSessionExpired;
+  void Function()? onSessionRestored;
 
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
@@ -42,6 +53,10 @@ class ApiClient {
     _token = token;
     if (refreshToken != null) {
       _refreshToken = refreshToken;
+    }
+
+    if (token != null && token.isNotEmpty) {
+      onSessionRestored?.call();
     }
 
     if (kIsWeb) {
@@ -128,10 +143,15 @@ class ApiClient {
   }
 
   Future<bool> _tryRefreshToken() async {
-    if (_isRefreshing || _refreshToken == null || _refreshToken!.isEmpty) {
+    if (_refreshCompleter != null) {
+      return _refreshCompleter!.future;
+    }
+    if (_refreshToken == null || _refreshToken!.isEmpty) {
       return false;
     }
-    _isRefreshing = true;
+
+    final completer = Completer<bool>();
+    _refreshCompleter = completer;
     try {
       final res = await http.post(
         Uri.parse('$apiBaseUrl/api/auth/refresh'),
@@ -146,17 +166,49 @@ class ApiClient {
           final newRefresh = data?['refreshToken'] as String?;
           if (newToken != null && newToken.isNotEmpty) {
             await saveToken(newToken, refreshToken: newRefresh);
+            completer.complete(true);
             return true;
           }
         }
       }
       await saveToken(null);
+      completer.complete(false);
       return false;
-    } catch (e) {
+    } catch (_) {
+      completer.complete(false);
       return false;
     } finally {
-      _isRefreshing = false;
+      if (identical(_refreshCompleter, completer)) {
+        _refreshCompleter = null;
+      }
     }
+  }
+
+  Future<Never> _onUnauthorized() async {
+    // 不 await 跳转，尽快让调用方收到异常；跳转与提示在后台完成
+    final handler = onSessionExpired;
+    if (handler != null) {
+      unawaited(handler());
+    }
+    throw SessionExpiredException();
+  }
+
+  Future<Map<String, dynamic>> _afterUnauthorized(
+    http.Response res, {
+    required bool retry,
+    required bool isAuthPath,
+    required Future<Map<String, dynamic>> Function() retryCall,
+  }) async {
+    if (res.statusCode != 401) {
+      return _decode(res);
+    }
+    if (isAuthPath) {
+      return _decode(res);
+    }
+    if (retry && await _tryRefreshToken()) {
+      return retryCall();
+    }
+    return _onUnauthorized();
   }
 
   Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body, {bool retry = true}) async {
@@ -165,22 +217,22 @@ class ApiClient {
       headers: _headers(),
       body: jsonEncode(body),
     );
-    if (res.statusCode == 401 && retry && !path.contains('/auth/')) {
-      if (await _tryRefreshToken()) {
-        return postJson(path, body, retry: false);
-      }
-    }
-    return _decode(res);
+    return _afterUnauthorized(
+      res,
+      retry: retry,
+      isAuthPath: path.contains('/auth/'),
+      retryCall: () => postJson(path, body, retry: false),
+    );
   }
 
   Future<Map<String, dynamic>> getJson(String path, {bool retry = true}) async {
     final res = await http.get(Uri.parse('$apiBaseUrl$path'), headers: _headers());
-    if (res.statusCode == 401 && retry && !path.contains('/auth/')) {
-      if (await _tryRefreshToken()) {
-        return getJson(path, retry: false);
-      }
-    }
-    return _decode(res);
+    return _afterUnauthorized(
+      res,
+      retry: retry,
+      isAuthPath: path.contains('/auth/'),
+      retryCall: () => getJson(path, retry: false),
+    );
   }
 
   Future<Map<String, dynamic>> putJson(String path, Map<String, dynamic> body, {bool retry = true}) async {
@@ -189,12 +241,12 @@ class ApiClient {
       headers: _headers(),
       body: jsonEncode(body),
     );
-    if (res.statusCode == 401 && retry && !path.contains('/auth/')) {
-      if (await _tryRefreshToken()) {
-        return putJson(path, body, retry: false);
-      }
-    }
-    return _decode(res);
+    return _afterUnauthorized(
+      res,
+      retry: retry,
+      isAuthPath: path.contains('/auth/'),
+      retryCall: () => putJson(path, body, retry: false),
+    );
   }
 
   Future<Map<String, dynamic>> completeCheckin({String? text, XFile? image, bool retry = true}) async {
@@ -215,12 +267,12 @@ class ApiClient {
     }
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
-    if (res.statusCode == 401 && retry) {
-      if (await _tryRefreshToken()) {
-        return completeCheckin(text: text, image: image, retry: false);
-      }
-    }
-    return _decode(res);
+    return _afterUnauthorized(
+      res,
+      retry: retry,
+      isAuthPath: false,
+      retryCall: () => completeCheckin(text: text, image: image, retry: false),
+    );
   }
 
   Future<Map<String, dynamic>> uploadAvatar(XFile image, {bool retry = true}) async {
@@ -236,12 +288,12 @@ class ApiClient {
     ));
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
-    if (res.statusCode == 401 && retry) {
-      if (await _tryRefreshToken()) {
-        return uploadAvatar(image, retry: false);
-      }
-    }
-    return _decode(res);
+    return _afterUnauthorized(
+      res,
+      retry: retry,
+      isAuthPath: false,
+      retryCall: () => uploadAvatar(image, retry: false),
+    );
   }
 
   Future<Map<String, dynamic>> rateCheckin(int checkinId, int score) async {
@@ -253,7 +305,15 @@ class ApiClient {
   }
 
   Map<String, dynamic> _decode(http.Response res) {
-    final map = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    Map<String, dynamic> map;
+    try {
+      map = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    } catch (_) {
+      if (res.statusCode == 401) {
+        throw SessionExpiredException();
+      }
+      throw Exception(res.statusCode >= 400 ? '请求失败（${res.statusCode}）' : '响应解析失败');
+    }
     if (res.statusCode >= 400 || map['success'] == false) {
       throw Exception(map['message']?.toString() ?? '请求失败');
     }

@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_keys.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/api_client.dart';
 import 'services/chat_inbox.dart';
 import 'services/reminder_service.dart';
+import 'services/session.dart';
 import 'theme.dart';
 
-final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+export 'app_keys.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  bindSessionHandlers();
   await ApiClient.instance.loadToken();
   await ChatInbox.instance.load();
   await ReminderService.instance.init();
@@ -30,6 +32,7 @@ class LuckySignApp extends StatelessWidget {
       title: '今日幸运签',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
+      navigatorKey: rootNavigatorKey,
       scaffoldMessengerKey: rootScaffoldMessengerKey,
       home: ApiClient.instance.isLoggedIn ? const HomeShell() : const LoginScreen(),
     );
@@ -60,17 +63,5 @@ Future<void> logoutAndGoLogin(BuildContext context, {bool askConfirm = true}) as
     final ok = await confirmLogout(context);
     if (!ok) return;
   }
-  await ApiClient.instance.saveToken(null);
-  await ChatInbox.instance.reset();
-  final prefs = await SharedPreferences.getInstance();
-  final lastEmail = prefs.getString('lastEmail');
-  await prefs.clear();
-  if (lastEmail != null && lastEmail.isNotEmpty) {
-    await prefs.setString('lastEmail', lastEmail);
-  }
-  if (!context.mounted) return;
-  Navigator.of(context).pushAndRemoveUntil(
-    MaterialPageRoute(builder: (_) => const LoginScreen()),
-    (_) => false,
-  );
+  await logoutToLogin();
 }

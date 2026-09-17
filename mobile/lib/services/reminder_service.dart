@@ -21,29 +21,39 @@ class ReminderService {
       tz.setLocalLocation(tz.getLocation('Asia/Shanghai'));
     }
 
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const ios = DarwinInitializationSettings(
-      requestAlertPermission: false,
-      requestBadgePermission: false,
-      requestSoundPermission: false,
-    );
-    await _plugin.initialize(
-      const InitializationSettings(android: android, iOS: ios),
-    );
-    await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-    await _plugin
-        .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
-        ?.requestPermissions(alert: true, badge: true, sound: true);
-    _ready = true;
+    try {
+      const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const ios = DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      );
+      await _plugin.initialize(
+        const InitializationSettings(android: android, iOS: ios),
+      );
+      await _plugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+      await _plugin
+          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
+      _ready = true;
+    } catch (e) {
+      debugPrint('ReminderService.init failed: $e');
+      _ready = false;
+    }
   }
 
   Future<void> scheduleDaily() async {
     if (kIsWeb || !_ready) return;
-    await _plugin.cancelAll();
-    await _daily(1, 8, 0, '今日幸运签已到', '打开看看今天的签文和任务吧');
-    await _daily(2, 20, 0, '今日任务还没打卡？', '0 点结算，未完成会断连续并扣分');
+    try {
+      await _plugin.cancelAll();
+      await _daily(1, 8, 0, '今日幸运签已到', '打开看看今天的签文和任务吧');
+      await _daily(2, 20, 0, '今日任务还没打卡？', '0 点结算，未完成会断连续并扣分');
+    } catch (e) {
+      // 通知失败不应阻断登录 / 进入首页
+      debugPrint('ReminderService.scheduleDaily failed: $e');
+    }
   }
 
   Future<void> _daily(int id, int hour, int minute, String title, String body) async {

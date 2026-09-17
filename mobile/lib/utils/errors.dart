@@ -1,5 +1,10 @@
+import '../services/api_client.dart' show SessionExpiredException;
+
 /// 统一把接口/运行时异常转成可读文案。
 String formatError(Object error) {
+  if (error is SessionExpiredException) {
+    return error.toString();
+  }
   final raw = error.toString();
   return raw
       .replaceFirst(RegExp(r'^Exception:\s*'), '')
