@@ -17,14 +17,31 @@ Future<void> main() async {
   await ApiClient.instance.loadToken();
   await ChatInbox.instance.load();
   await ReminderService.instance.init();
-  if (ApiClient.instance.isLoggedIn) {
+  final loggedIn = await _ensureValidSession();
+  if (loggedIn) {
     await ReminderService.instance.scheduleDaily();
   }
-  runApp(const LuckySignApp());
+  runApp(LuckySignApp(loggedIn: loggedIn));
+}
+
+/// 本地有 token 时向服务端校验；失效则清会话，避免直接进首页后处处报错。
+Future<bool> _ensureValidSession() async {
+  if (!ApiClient.instance.isLoggedIn) return false;
+  try {
+    await ApiClient.instance.getJson('/api/user/profile');
+    return ApiClient.instance.isLoggedIn;
+  } on SessionExpiredException {
+    return false;
+  } catch (_) {
+    await ApiClient.instance.saveToken(null);
+    return false;
+  }
 }
 
 class LuckySignApp extends StatelessWidget {
-  const LuckySignApp({super.key});
+  const LuckySignApp({super.key, required this.loggedIn});
+
+  final bool loggedIn;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +51,7 @@ class LuckySignApp extends StatelessWidget {
       theme: buildAppTheme(),
       navigatorKey: rootNavigatorKey,
       scaffoldMessengerKey: rootScaffoldMessengerKey,
-      home: ApiClient.instance.isLoggedIn ? const HomeShell() : const LoginScreen(),
+      home: loggedIn ? const HomeShell() : const LoginScreen(),
     );
   }
 }

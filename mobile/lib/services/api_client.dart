@@ -199,16 +199,29 @@ class ApiClient {
     required bool isAuthPath,
     required Future<Map<String, dynamic>> Function() retryCall,
   }) async {
-    if (res.statusCode != 401) {
-      return _decode(res);
-    }
-    if (isAuthPath) {
+    if (!_isSessionAuthFailure(res, isAuthPath: isAuthPath)) {
       return _decode(res);
     }
     if (retry && await _tryRefreshToken()) {
       return retryCall();
     }
     return _onUnauthorized();
+  }
+
+  /// 401，或旧后端对失效会话返回的 403；已登录但无权限的 403 不踢下线。
+  bool _isSessionAuthFailure(http.Response res, {required bool isAuthPath}) {
+    if (isAuthPath) return false;
+    if (res.statusCode == 401) return true;
+    if (res.statusCode != 403 || _token == null || _token!.isEmpty) return false;
+    try {
+      final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+      if (decoded is Map && (decoded['message']?.toString() ?? '').contains('权限')) {
+        return false;
+      }
+    } catch (_) {
+      // 非 JSON（旧 Spring 默认 403 页）视为会话失效
+    }
+    return true;
   }
 
   Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body, {bool retry = true}) async {

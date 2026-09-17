@@ -207,9 +207,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
           children: [
-            if (_error != null && p == null)
-              ErrorRetry(message: _error!, onRetry: () => _load(force: true))
-            else if (_error != null)
+            if (_error != null && p == null) ...[
+              ErrorRetry(message: _error!, onRetry: () => _load(force: true)),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF8A4030),
+                    side: const BorderSide(color: Color(0xFFE2C8BC)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () => logoutAndGoLogin(context, askConfirm: false),
+                  child: const Text('退出登录'),
+                ),
+              ),
+            ] else if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),

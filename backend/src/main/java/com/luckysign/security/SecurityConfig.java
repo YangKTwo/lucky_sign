@@ -1,9 +1,13 @@
 package com.luckysign.security;
 
 import com.luckysign.config.CorsProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.luckysign.common.ApiResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -17,6 +21,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Configuration
@@ -25,13 +30,16 @@ public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
     private final RateLimitFilter rateLimitFilter;
     private final CorsProperties corsProperties;
+    private final ObjectMapper objectMapper;
 
     public SecurityConfig(JwtAuthFilter jwtAuthFilter,
                           RateLimitFilter rateLimitFilter,
-                          CorsProperties corsProperties) {
+                          CorsProperties corsProperties,
+                          ObjectMapper objectMapper) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.rateLimitFilter = rateLimitFilter;
         this.corsProperties = corsProperties;
+        this.objectMapper = objectMapper;
     }
 
     @Bean
@@ -45,9 +53,21 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/uploads/**", "/downloads/**", "/app", "/app/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint((request, response, authException) ->
+                                writeJson(response, HttpServletResponse.SC_UNAUTHORIZED, "未登录或登录已过期"))
+                        .accessDeniedHandler((request, response, accessDeniedException) ->
+                                writeJson(response, HttpServletResponse.SC_FORBIDDEN, "没有权限")))
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
+    }
+
+    private void writeJson(HttpServletResponse response, int status, String message) throws java.io.IOException {
+        response.setStatus(status);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        objectMapper.writeValue(response.getWriter(), new ApiResponse<>(false, message, null));
     }
 
     @Bean
