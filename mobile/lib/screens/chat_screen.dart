@@ -9,6 +9,7 @@ import '../services/chat_inbox.dart';
 import '../services/chat_socket.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
+import '../utils/refresh_gate.dart';
 import '../widgets/ui_bits.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -49,6 +50,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// 跳转到某条时短暂高亮。
   int? _highlightId;
+  final _avatarGate = RefreshGate(minInterval: const Duration(seconds: 45));
+  final _historyGate = RefreshGate(minInterval: const Duration(seconds: 12));
 
   static const _assistantNames = assistantMentionNames;
   static final _timeFmt = DateFormat('HH:mm');
@@ -84,6 +87,8 @@ class _ChatScreenState extends State<ChatScreen> {
         _markVisibleAsRead();
       }
       _refreshLiveAvatars();
+      // Soft refresh history only when cache is stale; WS already covers live inserts.
+      _softReloadHistory();
     }
   }
 
@@ -127,13 +132,21 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _refreshLiveAvatars() async {
-    await Future.wait([
-      _ensureMyUserId(),
-      _loadMembers(),
-    ]);
-    if (!mounted) return;
-    _applyLiveAvatarsToItems();
+  Future<void> _refreshLiveAvatars() {
+    return _avatarGate.run(() async {
+      await Future.wait([
+        _ensureMyUserId(),
+        _loadMembers(),
+      ]);
+      if (!mounted) return;
+      _applyLiveAvatarsToItems();
+    });
+  }
+
+  Future<void> _softReloadHistory() {
+    return _historyGate.run(() async {
+      await _loadHistory(quiet: true);
+    });
   }
 
   /// History/WS payloads snapshot avatarUrl; keep on-screen bubbles in sync with live profiles.
@@ -388,13 +401,20 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _loadHistory() async {
+  Future<void> _loadHistory({bool quiet = false}) async {
     try {
       await ChatInbox.instance.load();
       final res = await ApiClient.instance.getJson('/api/chat/messages?size=50');
       if (!mounted) return;
       final list = (res['data']['messages'] as List).cast<Map<String, dynamic>>();
       final hasMore = res['data']['hasMore'] == true;
+      final fp = list.map((m) => '${m['id']}|${m['avatarUrl']}|${m['content']}').join(';');
+      if (quiet && !_historyGate.noteFingerprint(fp) && _items.isNotEmpty) {
+        return;
+      }
+      if (!quiet) {
+        _historyGate.markFresh(fp);
+      }
       setState(() {
         _historyError = null;
         _hasMore = hasMore;
@@ -421,12 +441,14 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       // 进入会话：先落到最新；未读提示留给顶部胶囊。
-      await _scrollToLatest(animate: false);
+      if (!quiet) {
+        await _scrollToLatest(animate: false);
+      }
       if (widget.isActive && ChatInbox.instance.unreadCount == 0) {
         await _markVisibleAsRead();
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !quiet) {
         setState(() => _historyError = formatError(e));
       }
     } finally {
@@ -820,6 +842,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     _loading = true;
                     _historyError = null;
                   });
+                  _historyGate.invalidate();
                   _loadHistory();
                 }, child: const Text('重试')),
               ),

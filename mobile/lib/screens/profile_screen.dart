@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -6,10 +8,13 @@ import '../main.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
+import '../utils/refresh_gate.dart';
 import '../widgets/ui_bits.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.isActive = true});
+
+  final bool isActive;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -21,46 +26,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<Map<String, dynamic>> _history = [];
   List<Map<String, dynamic>> _calendar = [];
   String? _error;
+  final _gate = RefreshGate(minInterval: const Duration(seconds: 20));
 
   @override
   void initState() {
     super.initState();
-    _load();
+    if (widget.isActive) {
+      _load();
+    }
   }
 
-  Future<void> _load() async {
-    try {
-      final profile = await ApiClient.instance.getJson('/api/user/profile');
-      final history = await ApiClient.instance.getJson('/api/checkin/history');
-      Map<String, dynamic>? circle;
-      List<Map<String, dynamic>> calendar = [];
-      try {
-        final circleRes = await ApiClient.instance.getJson('/api/circle/me');
-        circle = circleRes['data'] as Map<String, dynamic>?;
-      } catch (_) {}
-      try {
-        final calRes = await ApiClient.instance.getJson('/api/checkin/calendar?days=84');
-        calendar = (calRes['data']['days'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-      } catch (_) {}
-      if (!mounted) return;
-      final data = profile['data'] as Map<String, dynamic>;
-      final id = data['id'];
-      if (id is int) {
-        await ApiClient.instance.saveUserId(id);
-      } else if (id is num) {
-        await ApiClient.instance.saveUserId(id.toInt());
-      }
-      setState(() {
-        _profile = data;
-        _circle = circle;
-        _history = (history['data']['items'] as List).cast<Map<String, dynamic>>();
-        _calendar = calendar;
-        _error = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = formatError(e));
+  @override
+  void didUpdateWidget(covariant ProfileScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      _load();
     }
+  }
+
+  Future<void> _load({bool force = false}) {
+    return _gate.run(() async {
+      try {
+        final profile = await ApiClient.instance.getJson('/api/user/profile');
+        final history = await ApiClient.instance.getJson('/api/checkin/history');
+        Map<String, dynamic>? circle;
+        List<Map<String, dynamic>> calendar = [];
+        try {
+          final circleRes = await ApiClient.instance.getJson('/api/circle/me');
+          circle = circleRes['data'] as Map<String, dynamic>?;
+        } catch (_) {}
+        try {
+          final calRes = await ApiClient.instance.getJson('/api/checkin/calendar?days=84');
+          calendar = (calRes['data']['days'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        } catch (_) {}
+        if (!mounted) return;
+        final data = profile['data'] as Map<String, dynamic>;
+        final historyItems = (history['data']['items'] as List).cast<Map<String, dynamic>>();
+        final fp = jsonEncode({
+          'profile': data,
+          'circle': circle,
+          'history': historyItems,
+          'calendar': calendar,
+        });
+        if (!_gate.noteFingerprint(fp) && _profile != null) {
+          return;
+        }
+        final id = data['id'];
+        if (id is int) {
+          await ApiClient.instance.saveUserId(id);
+        } else if (id is num) {
+          await ApiClient.instance.saveUserId(id.toInt());
+        }
+        setState(() {
+          _profile = data;
+          _circle = circle;
+          _history = historyItems;
+          _calendar = calendar;
+          _error = null;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _error = formatError(e));
+      }
+    }, force: force);
   }
 
   Future<void> _changeAvatar() async {
@@ -70,6 +98,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final res = await ApiClient.instance.uploadAvatar(picked);
       if (!mounted) return;
       setState(() => _profile = res['data'] as Map<String, dynamic>);
+      _gate.invalidate();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('头像已更新')));
     } catch (e) {
       if (!mounted) return;
@@ -99,6 +128,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final res = await ApiClient.instance.putJson('/api/user/profile', {'nickname': ctrl.text.trim()});
       if (!mounted) return;
       setState(() => _profile = res['data'] as Map<String, dynamic>);
+      _gate.invalidate();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(formatError(e))));
@@ -173,12 +203,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('我的')),
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () => _load(force: true),
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
           children: [
             if (_error != null && p == null)
-              ErrorRetry(message: _error!, onRetry: _load)
+              ErrorRetry(message: _error!, onRetry: () => _load(force: true))
             else if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),

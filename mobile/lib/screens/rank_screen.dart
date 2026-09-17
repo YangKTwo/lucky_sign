@@ -3,10 +3,13 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
+import '../utils/refresh_gate.dart';
 import '../widgets/ui_bits.dart';
 
 class RankScreen extends StatefulWidget {
-  const RankScreen({super.key});
+  const RankScreen({super.key, this.isActive = true});
+
+  final bool isActive;
 
   @override
   State<RankScreen> createState() => _RankScreenState();
@@ -15,25 +18,43 @@ class RankScreen extends StatefulWidget {
 class _RankScreenState extends State<RankScreen> {
   Map<String, dynamic>? _data;
   String? _error;
+  final _gate = RefreshGate(minInterval: const Duration(seconds: 30));
 
   @override
   void initState() {
     super.initState();
-    _load();
+    if (widget.isActive) {
+      _load();
+    }
   }
 
-  Future<void> _load() async {
-    try {
-      final res = await ApiClient.instance.getJson('/api/rank');
-      if (!mounted) return;
-      setState(() {
-        _data = res['data'] as Map<String, dynamic>;
-        _error = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = formatError(e));
+  @override
+  void didUpdateWidget(covariant RankScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      _load();
     }
+  }
+
+  Future<void> _load({bool force = false}) {
+    return _gate.run(() async {
+      try {
+        final res = await ApiClient.instance.getJson('/api/rank');
+        if (!mounted) return;
+        final data = res['data'] as Map<String, dynamic>;
+        final fp = data.toString();
+        if (!_gate.noteFingerprint(fp) && _data != null) {
+          return;
+        }
+        setState(() {
+          _data = data;
+          _error = null;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _error = formatError(e));
+      }
+    }, force: force);
   }
 
   @override
@@ -62,7 +83,7 @@ class _RankScreenState extends State<RankScreen> {
         body: Column(
           children: [
             if (_error != null && _data == null)
-              ErrorRetry(message: _error!, onRetry: _load)
+              ErrorRetry(message: _error!, onRetry: () => _load(force: true))
             else if (_error != null)
               Padding(
                 padding: const EdgeInsets.all(12),
@@ -118,12 +139,12 @@ class _RankScreenState extends State<RankScreen> {
   Widget _list(List<Map<String, dynamic>> items, {required _RankMode mode}) {
     if (items.isEmpty) {
       return RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () => _load(force: true),
         child: ListView(children: const [SizedBox(height: 80), Center(child: Text('暂无成员'))]),
       );
     }
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: () => _load(force: true),
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
         itemCount: items.length,

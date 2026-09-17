@@ -42,10 +42,10 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(
         index: _index,
         children: [
-          const TodayScreen(),
+          TodayScreen(isActive: _index == 0),
           ChatScreen(isActive: _index == 1),
-          const RankScreen(),
-          const ProfileScreen(),
+          RankScreen(isActive: _index == 2),
+          ProfileScreen(isActive: _index == 3),
         ],
       ),
       bottomNavigationBar: NavigationBar(

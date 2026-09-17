@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -7,10 +8,13 @@ import 'package:image_picker/image_picker.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
+import '../utils/refresh_gate.dart';
 import '../widgets/ui_bits.dart';
 
 class TodayScreen extends StatefulWidget {
-  const TodayScreen({super.key});
+  const TodayScreen({super.key, this.isActive = true});
+
+  final bool isActive;
 
   @override
   State<TodayScreen> createState() => _TodayScreenState();
@@ -22,15 +26,26 @@ class _TodayScreenState extends State<TodayScreen> {
   bool _loading = true;
   Timer? _clock;
   DateTime _now = DateTime.now();
+  final _gate = RefreshGate(minInterval: const Duration(seconds: 15));
 
   @override
   void initState() {
     super.initState();
-    _load();
+    if (widget.isActive) {
+      _load();
+    }
     _clock = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
       setState(() => _now = DateTime.now());
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant TodayScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      _load();
+    }
   }
 
   @override
@@ -39,22 +54,35 @@ class _TodayScreenState extends State<TodayScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
-    if (!mounted) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final res = await ApiClient.instance.getJson('/api/checkin/today');
+  Future<void> _load({bool force = false}) {
+    return _gate.run(() async {
       if (!mounted) return;
-      setState(() => _data = res['data'] as Map<String, dynamic>);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = formatError(e));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+      final showSpinner = _data == null;
+      if (showSpinner) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+      }
+      try {
+        final res = await ApiClient.instance.getJson('/api/checkin/today');
+        if (!mounted) return;
+        final data = res['data'] as Map<String, dynamic>;
+        final fp = jsonEncode(data);
+        if (!_gate.noteFingerprint(fp) && _data != null) {
+          return;
+        }
+        setState(() {
+          _data = data;
+          _error = null;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _error = formatError(e));
+      } finally {
+        if (mounted && _loading) setState(() => _loading = false);
+      }
+    }, force: force);
   }
 
   Future<void> _checkin() async {
@@ -163,8 +191,10 @@ class _TodayScreenState extends State<TodayScreen> {
     try {
       final res = await ApiClient.instance.completeCheckin(text: textCtrl.text, image: image);
       if (!mounted) return;
-      setState(() => _data = res['data'] as Map<String, dynamic>);
-      await _celebrateCheckin(res['data'] as Map<String, dynamic>);
+      final data = res['data'] as Map<String, dynamic>;
+      setState(() => _data = data);
+      _gate.markFresh(jsonEncode(data));
+      await _celebrateCheckin(data);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -229,11 +259,11 @@ class _TodayScreenState extends State<TodayScreen> {
       appBar: AppBar(
         title: const Text('今日运势'),
         actions: [
-          IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
+          IconButton(onPressed: () => _load(force: true), icon: const Icon(Icons.refresh)),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () => _load(force: true),
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           children: [
@@ -242,7 +272,7 @@ class _TodayScreenState extends State<TodayScreen> {
               ErrorRetry(
                 message: _error!,
                 hint: dormant ? '休眠账号请联系管理员解锁后才能抽签。' : null,
-                onRetry: _load,
+                onRetry: () => _load(force: true),
               ),
             if (d != null) ...[
               Container(
