@@ -262,6 +262,16 @@ class ApiClient {
     );
   }
 
+  Future<Map<String, dynamic>> deleteJson(String path, {bool retry = true}) async {
+    final res = await http.delete(Uri.parse('$apiBaseUrl$path'), headers: _headers());
+    return _afterUnauthorized(
+      res,
+      retry: retry,
+      isAuthPath: path.contains('/auth/'),
+      retryCall: () => deleteJson(path, retry: false),
+    );
+  }
+
   Future<Map<String, dynamic>> completeCheckin({String? text, XFile? image, bool retry = true}) async {
     final req = http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/api/checkin/complete'));
     if (_token != null) req.headers['Authorization'] = 'Bearer $_token';

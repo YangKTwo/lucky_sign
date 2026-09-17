@@ -1,13 +1,13 @@
 package com.luckysign.service;
 
 import com.luckysign.common.BizException;
+import com.luckysign.domain.ChatDeleteReason;
 import com.luckysign.domain.ChatMessageType;
 import com.luckysign.domain.UserTag;
 import com.luckysign.dto.ChatDtos;
 import com.luckysign.dto.RatingDtos;
 import com.luckysign.entity.ChatMessage;
 import com.luckysign.entity.CheckinRecord;
-import com.luckysign.entity.Circle;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.entity.User;
 import com.luckysign.event.AssistantRequestedEvent;
@@ -20,6 +20,8 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -150,11 +152,19 @@ public class ChatService {
 
     @Transactional
     public Long postAssistant(Long circleId, String content) {
+        return postAssistant(circleId, content, List.of());
+    }
+
+    @Transactional
+    public Long postAssistant(Long circleId, String content, List<Long> mentionedUserIds) {
         ChatMessage msg = new ChatMessage();
         msg.setCircleId(circleId);
         msg.setNickname(MentionService.ASSISTANT_DISPLAY_NAME);
         msg.setType(ChatMessageType.ASSISTANT);
         msg.setContent(content);
+        if (mentionedUserIds != null && !mentionedUserIds.isEmpty()) {
+            msg.setMentionedUserIds(mentionService.serializeMentionIds(mentionedUserIds));
+        }
         msg = chatMessageRepository.save(msg);
         messagingTemplate.convertAndSend("/topic/chat/" + circleId, toView(msg, null, null));
         return msg.getId();
@@ -169,9 +179,59 @@ public class ChatService {
         if (msg == null || msg.getType() != ChatMessageType.ASSISTANT) {
             return;
         }
+        if (msg.getDeletedAt() != null) {
+            return;
+        }
         msg.setContent(content);
         chatMessageRepository.save(msg);
         messagingTemplate.convertAndSend("/topic/chat/" + msg.getCircleId(), toView(msg, null, null));
+    }
+
+    @Transactional
+    public ChatDtos.MessageView recall(Long circleId, Long userId, Long messageId) {
+        ChatMessage msg = chatMessageRepository.findById(messageId)
+                .orElseThrow(() -> new BizException("消息不存在"));
+        if (!Objects.equals(msg.getCircleId(), circleId)) {
+            throw new BizException("消息不在当前圈子");
+        }
+        if (msg.getDeletedAt() != null) {
+            throw new BizException("消息已删除");
+        }
+        if (msg.getType() != ChatMessageType.TEXT) {
+            throw new BizException("该类消息不可撤回");
+        }
+        if (!Objects.equals(msg.getUserId(), userId)) {
+            throw new BizException("只能撤回自己的消息");
+        }
+        if (msg.getCreatedAt() == null
+                || msg.getCreatedAt().isBefore(Instant.now().minus(Duration.ofMinutes(2)))) {
+            throw new BizException("超过 2 分钟，无法撤回");
+        }
+        return softDelete(msg, userId, ChatDeleteReason.RECALL);
+    }
+
+    @Transactional
+    public ChatDtos.MessageView adminRemove(Long adminUserId, Long messageId) {
+        ChatMessage msg = chatMessageRepository.findById(messageId)
+                .orElseThrow(() -> new BizException("消息不存在"));
+        if (msg.getDeletedAt() != null) {
+            throw new BizException("消息已删除");
+        }
+        if (msg.getType() == ChatMessageType.CHECKIN || msg.getType() == ChatMessageType.SYSTEM) {
+            throw new BizException("该类消息不可删除");
+        }
+        return softDelete(msg, adminUserId, ChatDeleteReason.ADMIN_REMOVE);
+    }
+
+    private ChatDtos.MessageView softDelete(ChatMessage msg, Long actorId, ChatDeleteReason reason) {
+        msg.setDeletedAt(Instant.now());
+        msg.setDeletedBy(actorId);
+        msg.setDeleteReason(reason);
+        chatMessageRepository.save(msg);
+        User user = msg.getUserId() == null ? null : userRepository.findById(msg.getUserId()).orElse(null);
+        ChatDtos.MessageView view = toView(msg, user, null);
+        messagingTemplate.convertAndSend("/topic/chat/" + msg.getCircleId(), view);
+        return view;
     }
 
     private Map<Long, User> loadUsers(List<ChatMessage> list) {
@@ -183,22 +243,34 @@ public class ChatService {
     }
 
     private ChatDtos.MessageView toView(ChatMessage msg, User user, RatingDtos.RatingSummary rating) {
+        boolean deleted = msg.getDeletedAt() != null;
+        String content = msg.getContent();
+        String imageUrl = msg.getImageUrl();
+        List<Long> mentions = mentionService.deserializeMentionIds(msg.getMentionedUserIds());
+        String deleteReason = msg.getDeleteReason() == null ? null : msg.getDeleteReason().name();
+        if (deleted) {
+            content = msg.getDeleteReason() == ChatDeleteReason.RECALL ? "已撤回" : "管理员已删除";
+            imageUrl = null;
+            mentions = List.of();
+        }
         return new ChatDtos.MessageView(
                 msg.getId(),
                 msg.getUserId(),
                 msg.getNickname(),
                 user == null ? null : user.getAvatarUrl(),
                 msg.getType(),
-                msg.getContent(),
-                msg.getImageUrl(),
-                msg.getCheckinId(),
+                content,
+                imageUrl,
+                deleted ? null : msg.getCheckinId(),
                 msg.getCreatedAt(),
-                rating == null ? null : rating.avgScore(),
-                rating == null ? 0 : rating.ratingCount(),
-                rating == null ? 0 : rating.expectedRaterCount(),
-                rating != null && rating.ratingComplete(),
-                rating == null ? null : rating.myScore(),
-                mentionService.deserializeMentionIds(msg.getMentionedUserIds())
+                rating == null || deleted ? null : rating.avgScore(),
+                rating == null || deleted ? 0 : rating.ratingCount(),
+                rating == null || deleted ? 0 : rating.expectedRaterCount(),
+                !deleted && rating != null && rating.ratingComplete(),
+                rating == null || deleted ? null : rating.myScore(),
+                mentions,
+                deleted,
+                deleteReason
         );
     }
 }

@@ -21,7 +21,9 @@ public class ChatDtos {
             Integer expectedRaterCount,
             boolean ratingComplete,
             Integer myScore,
-            List<Long> mentionedUserIds
+            List<Long> mentionedUserIds,
+            boolean deleted,
+            String deleteReason
     ) {
     }
 

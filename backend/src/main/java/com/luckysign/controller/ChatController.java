@@ -36,4 +36,13 @@ public class ChatController {
         Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
         return ApiResponse.ok(chatService.sendText(resolvedCircleId, userId, request.content()));
     }
+
+    @PostMapping("/messages/{messageId}/recall")
+    public ApiResponse<ChatDtos.MessageView> recall(
+            @PathVariable Long messageId,
+            @RequestParam(required = false) Long circleId) {
+        Long userId = AuthSupport.currentUserId();
+        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(chatService.recall(resolvedCircleId, userId, messageId));
+    }
 }

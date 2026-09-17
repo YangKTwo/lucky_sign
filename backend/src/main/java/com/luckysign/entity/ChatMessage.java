@@ -1,5 +1,6 @@
 package com.luckysign.entity;
 
+import com.luckysign.domain.ChatDeleteReason;
 import com.luckysign.domain.ChatMessageType;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -39,6 +40,14 @@ public class ChatMessage {
     /** 被 @ 的用户 id，逗号分隔 */
     @Column(length = 256)
     private String mentionedUserIds;
+
+    private Instant deletedAt;
+
+    private Long deletedBy;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 32)
+    private ChatDeleteReason deleteReason;
 
     @Column(nullable = false)
     private Instant createdAt = Instant.now();

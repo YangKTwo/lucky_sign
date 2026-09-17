@@ -84,6 +84,7 @@ class AdminServiceTest {
         verify(circleMemberRepository).save(member.capture());
         assertEquals(MemberRole.MEMBER, member.getValue().getRole());
         verify(chatService).postSystem(1L, "小明 加入了圈子");
+        verify(chatService).postAssistant(eq(1L), contains("@小明"), eq(List.of(9L)));
     }
 
     @Test

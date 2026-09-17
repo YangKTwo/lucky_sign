@@ -38,6 +38,7 @@ class _ChatScreenState extends State<ChatScreen> {
   int? _myUserId;
   String? _myNickname;
   String? _myAvatarUrl;
+  bool _isAdmin = false;
   bool _showMentionPicker = false;
   String _mentionQuery = '';
   int _atStart = -1;
@@ -83,9 +84,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // 切回社区：落到最新；上方若有未读，保留顶部提示可点跳转。
     if (widget.isActive && !oldWidget.isActive) {
       _scrollToLatest(animate: false);
-      if (_nearBottom) {
-        _markVisibleAsRead();
-      }
+      _scheduleViewportReadPass();
       _refreshLiveAvatars();
       // Soft refresh history only when cache is stale; WS already covers live inserts.
       _softReloadHistory();
@@ -117,6 +116,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final parsed = id is int ? id : (id is num ? id.toInt() : null);
       final nick = data?['nickname']?.toString();
       final avatar = data?['avatarUrl']?.toString();
+      final role = data?['role']?.toString();
       if (parsed != null) {
         await ApiClient.instance.saveUserId(parsed);
       }
@@ -124,6 +124,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (parsed != null) _myUserId = parsed;
         if (nick != null && nick.isNotEmpty) _myNickname = nick;
         _myAvatarUrl = avatar;
+        if (role != null) _isAdmin = role == 'ADMIN';
       });
       _applyLiveAvatarsToItems();
     } catch (e) {
@@ -232,41 +233,38 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() => _nearBottom = near);
     }
     if (!widget.isActive) return;
+    if (near && _newBelowCount != 0) {
+      setState(() => _newBelowCount = 0);
+    }
+    // 视口内出现的未读 / @ 一律消掉；贴底不再「有未读就不清」
+    _markUnreadsEnteredViewport();
     if (near) {
-      if (_newBelowCount != 0) {
-        setState(() => _newBelowCount = 0);
-      }
-      // 有上方未读待跳转时，贴底不要整段清掉（否则顶部「↑未读」会立刻消失）
-      final hasCatchUp = ChatInbox.instance.unreadCount > 0 || ChatInbox.instance.mentionIds.value.isNotEmpty;
-      if (!hasCatchUp) {
-        _markVisibleAsRead();
-      }
-    } else {
-      _markUnreadsEnteredViewport();
-      if (_scroll.position.pixels <= 48) {
-        _loadOlder();
-      }
+      _persistLastReadIfCaughtUp();
+    }
+    if (!near && _scroll.position.pixels <= 48) {
+      _loadOlder();
     }
   }
 
-  /// 向上浏览时，进入视口的未读逐条消掉。
+  /// 向上浏览或首屏露出时，进入视口的未读逐条消掉。
   void _markUnreadsEnteredViewport() {
-    if (!_scroll.hasClients) return;
+    if (!_scroll.hasClients || !mounted) return;
     final ids = {
       ...ChatInbox.instance.unreadIds.value,
       ...ChatInbox.instance.mentionIds.value,
     };
     if (ids.isEmpty) return;
     var changed = false;
+    final screenH = MediaQuery.sizeOf(context).height;
     for (final id in ids) {
       final ctx = _itemKeys[id]?.currentContext;
       if (ctx == null || !ctx.mounted) continue;
       final ro = ctx.findRenderObject();
       if (ro is! RenderBox || !ro.hasSize) continue;
-      final dy = ro.localToGlobal(Offset.zero).dy;
-      final screenH = MediaQuery.sizeOf(context).height;
-      // 大致进入屏幕中部偏上，视为已看见
-      if (dy > 80 && dy < screenH * 0.75) {
+      final top = ro.localToGlobal(Offset.zero).dy;
+      final bottom = top + ro.size.height;
+      // 与屏幕有足够重叠即视为已看见
+      if (bottom > 72 && top < screenH - 48) {
         ChatInbox.instance.remove(id);
         changed = true;
       }
@@ -274,16 +272,39 @@ class _ChatScreenState extends State<ChatScreen> {
     if (changed && mounted) setState(() {});
   }
 
-  Future<void> _markVisibleAsRead({bool force = false}) async {
+  /// 没有待追赶的未读时，把 lastRead 推到最新。
+  Future<void> _persistLastReadIfCaughtUp() async {
     if (_items.isEmpty) return;
-    if (!force) {
-      final hasCatchUp = ChatInbox.instance.unreadCount > 0 || ChatInbox.instance.mentionIds.value.isNotEmpty;
-      if (hasCatchUp) return;
+    if (ChatInbox.instance.unreadCount > 0 || ChatInbox.instance.mentionIds.value.isNotEmpty) {
+      return;
     }
     final latest = _asInt(_items.last['id']);
     if (latest == null) return;
     await ChatInbox.instance.markReadThrough(latest);
+  }
+
+  Future<void> _markVisibleAsRead({bool force = false}) async {
+    if (_items.isEmpty) return;
+    _markUnreadsEnteredViewport();
+    if (force) {
+      final latest = _asInt(_items.last['id']);
+      await ChatInbox.instance.clearAllAsRead(latest);
+      if (mounted) setState(() {});
+      return;
+    }
+    await _persistLastReadIfCaughtUp();
     if (mounted) setState(() {});
+  }
+
+  /// 布局完成后再扫一遍视口（进入社区 / 历史加载后）。
+  void _scheduleViewportReadPass() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.isActive) return;
+      _markUnreadsEnteredViewport();
+      if (_isNearBottom()) {
+        _persistLastReadIfCaughtUp();
+      }
+    });
   }
 
   bool _mentionsMe(Map<String, dynamic> m) {
@@ -373,7 +394,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _jumpToMessage(int id, {required bool markThrough}) async {
+  Future<void> _jumpToMessage(int id, {required bool markThrough, bool clearAllUnread = false}) async {
     final index = _items.indexWhere((e) => _asInt(e['id']) == id);
     if (index < 0) {
       ChatInbox.instance.remove(id);
@@ -392,7 +413,10 @@ class _ChatScreenState extends State<ChatScreen> {
         alignment: 0.25,
       );
     }
-    if (markThrough) {
+    if (clearAllUnread) {
+      final latest = _items.isEmpty ? id : (_asInt(_items.last['id']) ?? id);
+      await ChatInbox.instance.clearAllAsRead(latest);
+    } else if (markThrough) {
       await ChatInbox.instance.markReadThrough(id);
     } else {
       ChatInbox.instance.remove(id);
@@ -406,15 +430,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _jumpToOldestUnreadOrMention() async {
-    final mentionId = ChatInbox.instance.oldestMention;
-    if (mentionId != null) {
-      await _jumpToMessage(mentionId, markThrough: true);
-      return;
-    }
-    final unreadId = ChatInbox.instance.oldestUnread;
-    if (unreadId != null) {
-      await _jumpToMessage(unreadId, markThrough: true);
-    }
+    final targetId = ChatInbox.instance.oldestMention ?? ChatInbox.instance.oldestUnread;
+    if (targetId == null) return;
+    // 点一次：跳到最早未读/@，并清掉全部未读计数
+    await _jumpToMessage(targetId, markThrough: true, clearAllUnread: true);
   }
 
   Future<void> _loadHistory({bool quiet = false}) async {
@@ -456,12 +475,12 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       }
 
-      // 进入会话：先落到最新；未读提示留给顶部胶囊。
+      // 进入会话：先落到最新；视口内未读下一帧消掉，上方未读留给顶部胶囊。
       if (!quiet) {
         await _scrollToLatest(animate: false);
       }
-      if (widget.isActive && ChatInbox.instance.unreadCount == 0) {
-        await _markVisibleAsRead();
+      if (widget.isActive) {
+        _scheduleViewportReadPass();
       }
     } catch (e) {
       if (mounted && !quiet) {
@@ -603,6 +622,124 @@ class _ChatScreenState extends State<ChatScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1), behavior: SnackBarBehavior.floating),
     );
+  }
+
+  bool _isDeleted(Map<String, dynamic> m) => m['deleted'] == true;
+
+  bool _canRecall(Map<String, dynamic> m) {
+    if (_isDeleted(m) || !_isMine(m)) return false;
+    if (m['type']?.toString() != 'TEXT') return false;
+    final when = _createdAt(m);
+    if (when == null) return false;
+    return DateTime.now().difference(when) <= const Duration(minutes: 2);
+  }
+
+  bool _canAdminDelete(Map<String, dynamic> m) {
+    if (!_isAdmin || _isDeleted(m) || _isMine(m)) return false;
+    final type = m['type']?.toString();
+    return type == 'TEXT' || type == 'ASSISTANT';
+  }
+
+  Future<void> _showMessageActions(Map<String, dynamic> m) async {
+    final deleted = _isDeleted(m);
+    final content = m['content']?.toString() ?? '';
+    final canCopy = !deleted && content.trim().isNotEmpty;
+    final canRecall = _canRecall(m);
+    final canAdminDelete = _canAdminDelete(m);
+    if (!canCopy && !canRecall && !canAdminDelete) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (canCopy)
+                ListTile(
+                  leading: const Icon(Icons.copy_rounded),
+                  title: const Text('复制'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _copyText(content);
+                  },
+                ),
+              if (canRecall)
+                ListTile(
+                  leading: const Icon(Icons.undo_rounded),
+                  title: const Text('撤回'),
+                  subtitle: const Text('2 分钟内可撤回'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _recallMessage(m);
+                  },
+                ),
+              if (canAdminDelete)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Color(0xFFC0392B)),
+                  title: const Text('删除消息', style: TextStyle(color: Color(0xFFC0392B))),
+                  subtitle: const Text('管理员操作，圈子内同步'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _adminDeleteMessage(m);
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.close),
+                title: const Text('取消'),
+                onTap: () => Navigator.pop(ctx),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _recallMessage(Map<String, dynamic> m) async {
+    final id = _asInt(m['id']);
+    if (id == null) return;
+    try {
+      final res = await ApiClient.instance.postJson('/api/chat/messages/$id/recall', {});
+      if (!mounted) return;
+      final msg = res['data'] as Map<String, dynamic>?;
+      if (msg != null) setState(() => _upsertMessage(msg));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(formatError(e))));
+    }
+  }
+
+  Future<void> _adminDeleteMessage(Map<String, dynamic> m) async {
+    final id = _asInt(m['id']);
+    if (id == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除消息'),
+        content: const Text('确定删除该消息？圈子成员都会看到「管理员已删除」。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC0392B)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final res = await ApiClient.instance.deleteJson('/api/admin/chat/messages/$id');
+      if (!mounted) return;
+      final msg = res['data'] as Map<String, dynamic>?;
+      if (msg != null) setState(() => _upsertMessage(msg));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(formatError(e))));
+    }
   }
 
   Future<void> _openCheckinDetail(Map<String, dynamic> m) async {
@@ -1031,10 +1168,11 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _bubble(Map<String, dynamic> m) {
     final type = m['type']?.toString();
     final name = m['nickname']?.toString() ?? '系统';
+    final deleted = _isDeleted(m);
     final content = m['content']?.toString() ?? '';
-    final img = imageFullUrl(m['imageUrl']?.toString());
+    final img = deleted ? '' : imageFullUrl(m['imageUrl']?.toString());
     final avatarUrl = m['avatarUrl']?.toString();
-    final mentionedMe = _mentionsMe(m);
+    final mentionedMe = !deleted && _mentionsMe(m);
     final id = _asInt(m['id']);
     final highlighted = id != null && id == _highlightId;
     final when = _createdAt(m);
@@ -1053,7 +1191,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     final mine = _isMine(m);
-    final checkin = type == 'CHECKIN';
+    final checkin = !deleted && type == 'CHECKIN';
     final assistant = type == 'ASSISTANT';
     final displayName = assistant ? (name.isEmpty ? '石桥头第一AI' : name) : name;
     final avatar = UserAvatar(
@@ -1067,12 +1205,31 @@ class _ChatScreenState extends State<ChatScreen> {
     final count = m['ratingCount'] is num ? (m['ratingCount'] as num).toInt() : 0;
     final expected = m['expectedRaterCount'] is num ? (m['expectedRaterCount'] as num).toInt() : 0;
     final complete = m['ratingComplete'] == true;
+    final canAct = _canRecall(m) || _canAdminDelete(m) || (!deleted && content.trim().isNotEmpty);
+
+    Color bubbleColor() {
+      if (deleted) return const Color(0xFFF3F0EC);
+      if (highlighted) return const Color(0xFFFFE08A);
+      if (mentionedMe) return const Color(0xFFFFF6E0);
+      if (mine) return checkin ? const Color(0xFFFFF3D6) : const Color(0xFFFFE8D6);
+      if (assistant) return const Color(0xFFEEF0FF);
+      return checkin ? const Color(0xFFFFF3D6) : Colors.white;
+    }
+
+    Color bubbleBorder() {
+      if (deleted) return const Color(0xFFD9D2CA);
+      if (highlighted) return const Color(0xFFFF8A00);
+      if (mentionedMe) return const Color(0xFFFFB020);
+      if (mine) return checkin ? const Color(0xFFE8C96A) : const Color(0xFFE8B48A);
+      if (assistant) return const Color(0xFFC9D0FF);
+      return checkin ? const Color(0xFFE8C96A) : const Color(0xFFE7DDD2);
+    }
 
     final bubble = Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: checkin && m['checkinId'] != null ? () => _openCheckinDetail(m) : null,
-        onLongPress: content.trim().isEmpty ? null : () => _copyText(content),
+        onLongPress: canAct ? () => _showMessageActions(m) : null,
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(mine ? 16 : 4),
           topRight: Radius.circular(mine ? 4 : 16),
@@ -1084,15 +1241,7 @@ class _ChatScreenState extends State<ChatScreen> {
           constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.72),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: highlighted
-                ? const Color(0xFFFFE08A)
-                : (mentionedMe
-                    ? const Color(0xFFFFF6E0)
-                    : (mine
-                        ? (checkin ? const Color(0xFFFFF3D6) : const Color(0xFFFFE8D6))
-                        : (assistant
-                            ? const Color(0xFFEEF0FF)
-                            : (checkin ? const Color(0xFFFFF3D6) : Colors.white)))),
+            color: bubbleColor(),
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(mine ? 16 : 4),
               topRight: Radius.circular(mine ? 4 : 16),
@@ -1100,18 +1249,10 @@ class _ChatScreenState extends State<ChatScreen> {
               bottomRight: const Radius.circular(16),
             ),
             border: Border.all(
-              color: highlighted
-                  ? const Color(0xFFFF8A00)
-                  : (mentionedMe
-                      ? const Color(0xFFFFB020)
-                      : (mine
-                          ? (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE8B48A))
-                          : (assistant
-                              ? const Color(0xFFC9D0FF)
-                              : (checkin ? const Color(0xFFE8C96A) : const Color(0xFFE7DDD2))))),
+              color: bubbleBorder(),
               width: highlighted ? 2.5 : (mentionedMe ? 2 : 1),
             ),
-            boxShadow: highlighted || mentionedMe
+            boxShadow: !deleted && (highlighted || mentionedMe)
                 ? [
                     BoxShadow(
                       color: Color(highlighted ? 0x66FF8A00 : 0x33FFB020),
@@ -1124,57 +1265,70 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Column(
             crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
-              if (mentionedMe && !mine) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF8A00),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    '提到了你',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      height: 1.1,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
-              if (checkin) const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-              if (assistant)
-                Text('🤖 $displayName',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: Color(0xFF5B6CFF))),
-              if (checkin || assistant) const SizedBox(height: 4),
-              if (assistant && content == '正在回复…')
-                const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF5B6CFF)),
-                    ),
-                    SizedBox(width: 8),
-                    Text('正在回复…', style: TextStyle(height: 1.35, color: Color(0xFF5B6CFF))),
-                  ],
-                )
-              else
-                _richContent(content, mine: mine),
-              if (img.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                NetworkImageBox(url: img),
-              ],
-              if (checkin && m['checkinId'] != null) ...[
-                const SizedBox(height: 10),
+              if (deleted)
                 Text(
-                  complete
-                      ? '全员已评 · 均分 ${avg ?? '-'}（$count 人）'
-                      : '评分进度 $count/$expected · 点击查看评分',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF8A8078), fontWeight: FontWeight.w600),
-                ),
+                  content.isEmpty
+                      ? (m['deleteReason']?.toString() == 'RECALL' ? '已撤回' : '管理员已删除')
+                      : content,
+                  style: const TextStyle(
+                    height: 1.35,
+                    fontStyle: FontStyle.italic,
+                    color: Color(0xFF8A8078),
+                  ),
+                )
+              else ...[
+                if (mentionedMe && !mine) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF8A00),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text(
+                      '提到了你',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        height: 1.1,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (checkin) const Text('✅ 打卡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                if (assistant)
+                  Text('🤖 $displayName',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: Color(0xFF5B6CFF))),
+                if (checkin || assistant) const SizedBox(height: 4),
+                if (assistant && content == '正在回复…')
+                  const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF5B6CFF)),
+                      ),
+                      SizedBox(width: 8),
+                      Text('正在回复…', style: TextStyle(height: 1.35, color: Color(0xFF5B6CFF))),
+                    ],
+                  )
+                else
+                  _richContent(content, mine: mine),
+                if (img.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  NetworkImageBox(url: img),
+                ],
+                if (checkin && m['checkinId'] != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    complete
+                        ? '全员已评 · 均分 ${avg ?? '-'}（$count 人）'
+                        : '评分进度 $count/$expected · 点击查看评分',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF8A8078), fontWeight: FontWeight.w600),
+                  ),
+                ],
               ],
             ],
           ),

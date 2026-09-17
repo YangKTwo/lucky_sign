@@ -72,6 +72,8 @@ public class AdminService {
         userRepository.save(user);
 
         chatService.postSystem(circle.getId(), user.getNickname() + " 加入了圈子");
+        String welcome = "@" + user.getNickname() + " 欢迎加入圈子～有问题可以问我。";
+        chatService.postAssistant(circle.getId(), welcome, List.of(user.getId()));
         return AuthService.toProfile(user);
     }
 
