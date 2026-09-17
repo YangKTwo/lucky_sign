@@ -120,6 +120,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _openFeedbackInbox() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => const _FeedbackInboxSheet(),
+    );
+  }
+
   Future<void> _copyInvite() async {
     final code = _circle?['inviteCode']?.toString() ?? '';
     if (code.isEmpty) return;
@@ -230,9 +242,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   subtitle: '通过后对方才能登录',
                   onTap: _openApprovals,
                 ),
+                const SizedBox(height: 10),
+                _FeedbackEntry(
+                  title: '用户意见',
+                  subtitle: '查看其他用户提交的反馈',
+                  onTap: _openFeedbackInbox,
+                ),
+              ] else ...[
+                const SizedBox(height: 10),
+                _FeedbackEntry(onTap: _openFeedback),
               ],
-              const SizedBox(height: 10),
-              _FeedbackEntry(onTap: _openFeedback),
               const SizedBox(height: 28),
               const Row(
                 children: [
@@ -441,8 +460,14 @@ class _HistoryRow extends StatelessWidget {
 }
 
 class _FeedbackEntry extends StatelessWidget {
-  const _FeedbackEntry({required this.onTap});
+  const _FeedbackEntry({
+    required this.onTap,
+    this.title = '意见箱',
+    this.subtitle = '提需求、吐槽、许愿都可以',
+  });
   final VoidCallback onTap;
+  final String title;
+  final String subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -458,21 +483,21 @@ class _FeedbackEntry extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: const Color(0xFFE7DDD2)),
           ),
-          child: const Row(
+          child: Row(
             children: [
-              Icon(Icons.mail_outline, color: AppColors.moss, size: 26),
-              SizedBox(width: 14),
+              const Icon(Icons.mail_outline, color: AppColors.moss, size: 26),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('意见箱', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                    SizedBox(height: 4),
-                    Text('提需求、吐槽、许愿都可以', style: TextStyle(fontSize: 13, color: Color(0xFF8A8078), height: 1.3)),
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: const TextStyle(fontSize: 13, color: Color(0xFF8A8078), height: 1.3)),
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: Color(0xFFB0A69C)),
+              const Icon(Icons.chevron_right, color: Color(0xFFB0A69C)),
             ],
           ),
         ),
@@ -590,6 +615,136 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FeedbackInboxSheet extends StatefulWidget {
+  const _FeedbackInboxSheet();
+
+  @override
+  State<_FeedbackInboxSheet> createState() => _FeedbackInboxSheetState();
+}
+
+class _FeedbackInboxSheetState extends State<_FeedbackInboxSheet> {
+  List<Map<String, dynamic>> _items = [];
+  String? _error;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final res = await ApiClient.instance.getJson('/api/admin/feedbacks');
+      if (!mounted) return;
+      final list = (res['data']?['items'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+      setState(() {
+        _items = list;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = formatError(e);
+        _loading = false;
+      });
+    }
+  }
+
+  String _formatTime(dynamic raw) {
+    final dt = DateTime.tryParse(raw?.toString() ?? '')?.toLocal();
+    if (dt == null) return '';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final safe = MediaQuery.paddingOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 10, 20, 16 + bottom + safe),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(color: const Color(0xFFE0D6CC), borderRadius: BorderRadius.circular(4)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('用户意见', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          const Text('其他用户通过意见箱提交的内容', style: TextStyle(fontSize: 13, color: Color(0xFF8A8078))),
+          const SizedBox(height: 14),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null)
+            ErrorRetry(message: _error!, onRetry: _load)
+          else if (_items.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 36),
+              child: Center(child: Text('暂时还没有用户意见', style: TextStyle(color: Color(0xFF8A8078)))),
+            )
+          else
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.55),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: _items.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (_, i) {
+                  final item = _items[i];
+                  return Container(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE7DDD2)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item['nickname']?.toString() ?? '用户',
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                              ),
+                            ),
+                            Text(
+                              _formatTime(item['createdAt']),
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF8A8078)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          item['content']?.toString() ?? '',
+                          style: const TextStyle(fontSize: 14, height: 1.45, color: Color(0xFF3D342C)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
         ],
       ),
     );

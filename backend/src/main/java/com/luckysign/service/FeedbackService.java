@@ -1,6 +1,7 @@
 package com.luckysign.service;
 
 import com.luckysign.common.BizException;
+import com.luckysign.domain.UserRole;
 import com.luckysign.dto.FeedbackDtos;
 import com.luckysign.entity.Feedback;
 import com.luckysign.entity.User;
@@ -31,6 +32,9 @@ public class FeedbackService {
             throw new BizException("内容过长，最多 1000 字");
         }
         User user = userRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
+        if (user.getRole() == UserRole.ADMIN) {
+            throw new BizException("管理员请直接查看用户意见");
+        }
         Feedback fb = new Feedback();
         fb.setUserId(user.getId());
         fb.setNickname(user.getNickname());
