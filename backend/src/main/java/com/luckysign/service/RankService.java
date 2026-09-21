@@ -50,9 +50,11 @@ public class RankService {
     public RankDtos.RankingResponse ranking(Long circleId) {
         LocalDate today = drawService.today();
         List<CircleMember> members = circleMemberRepository.findByCircleId(circleId);
-        Map<Long, User> users = userRepository.findAllById(members.stream().map(CircleMember::getUserId).toList())
+        java.util.Set<Long> memberIds = members.stream().map(CircleMember::getUserId).collect(Collectors.toSet());
+        Map<Long, User> users = userRepository.findAllById(memberIds)
                 .stream().collect(Collectors.toMap(User::getId, Function.identity()));
         Map<Long, DailyDraw> draws = dailyDrawRepository.findByDrawDate(today).stream()
+                .filter(d -> memberIds.contains(d.getUserId()))
                 .collect(Collectors.toMap(DailyDraw::getUserId, Function.identity(), (a, b) -> a));
         Optional<CircleDailyStar> star = circleDailyStarRepository.findByCircleIdAndStarDate(circleId, today);
         Map<Long, Double> peerAvg = ratingService.finalizedAvgScoreByUser(circleId);

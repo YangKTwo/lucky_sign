@@ -4,6 +4,7 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
 import '../utils/refresh_gate.dart';
+import '../utils/today_habits.dart';
 import '../widgets/ui_bits.dart';
 
 class RankScreen extends StatefulWidget {
@@ -18,6 +19,7 @@ class RankScreen extends StatefulWidget {
 class _RankScreenState extends State<RankScreen> {
   Map<String, dynamic>? _data;
   String? _error;
+  bool _loading = true;
   final _gate = RefreshGate(minInterval: const Duration(seconds: 30));
 
   @override
@@ -38,6 +40,13 @@ class _RankScreenState extends State<RankScreen> {
 
   Future<void> _load({bool force = false}) {
     return _gate.run(() async {
+      if (!mounted) return;
+      if (_data == null) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+      }
       try {
         final res = await ApiClient.instance.getJson('/api/rank');
         if (!mounted) return;
@@ -49,10 +58,14 @@ class _RankScreenState extends State<RankScreen> {
         setState(() {
           _data = data;
           _error = null;
+          _loading = false;
         });
       } catch (e) {
         if (!mounted) return;
-        setState(() => _error = formatError(e));
+        setState(() {
+          _error = formatError(e);
+          _loading = false;
+        });
       }
     }, force: force);
   }
@@ -69,26 +82,31 @@ class _RankScreenState extends State<RankScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('圈子排行'),
-          bottom: const TabBar(
-            labelColor: AppColors.accent,
-            unselectedLabelColor: Color(0xFF8A8078),
-            indicatorColor: AppColors.accent,
-            tabs: [
-              Tab(text: '综合分'),
-              Tab(text: '任务分'),
-              Tab(text: '连续天'),
-            ],
-          ),
+          bottom: (_loading && _data == null) || (_error != null && _data == null)
+              ? null
+              : const TabBar(
+                  labelColor: AppColors.accent,
+                  unselectedLabelColor: Color(0xFF8A8078),
+                  indicatorColor: AppColors.accent,
+                  tabs: [
+                    Tab(text: '综合分'),
+                    Tab(text: '任务分'),
+                    Tab(text: '连续天'),
+                  ],
+                ),
         ),
         body: Column(
           children: [
-            if (_error != null && _data == null)
-              ErrorRetry(message: _error!, onRetry: () => _load(force: true))
-            else if (_error != null)
+            if (_error != null && _data != null)
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
               ),
+            if (_loading && _data == null)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else if (_error != null && _data == null)
+              Expanded(child: ErrorRetry(message: _error!, onRetry: () => _load(force: true)))
+            else ...[
             if (star != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -114,6 +132,11 @@ class _RankScreenState extends State<RankScreen> {
                   ),
                 ),
               ),
+            if (byComposite.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: _TodayPulseBanner(members: byComposite),
+              ),
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Text(
@@ -130,6 +153,7 @@ class _RankScreenState extends State<RankScreen> {
                 ],
               ),
             ),
+            ],
           ],
         ),
       ),
@@ -231,3 +255,69 @@ class _RankScreenState extends State<RankScreen> {
 }
 
 enum _RankMode { composite, points, streak }
+
+class _TodayPulseBanner extends StatelessWidget {
+  const _TodayPulseBanner({required this.members});
+  final List<Map<String, dynamic>> members;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = members.where((m) => m['tag']?.toString() != 'DORMANT').toList();
+    final total = active.isEmpty ? members.length : active.length;
+    final pool = active.isEmpty ? members : active;
+    final done = pool.where((m) => m['todayStatus']?.toString() == 'COMPLETED').length;
+    final me = ApiClient.instance.userId;
+    final iCompleted = pool.any((m) {
+      final uid = m['userId'];
+      return me != null && uid is num && uid.toInt() == me && m['todayStatus']?.toString() == 'COMPLETED';
+    });
+    final names = pool
+        .where((m) => m['todayStatus']?.toString() == 'COMPLETED')
+        .map((m) => m['nickname']?.toString() ?? '')
+        .where((n) => n.isNotEmpty)
+        .toList();
+    final pending = pool
+        .where((m) {
+          final uid = m['userId'];
+          final isMe = me != null && uid is num && uid.toInt() == me;
+          return !isMe && m['todayStatus']?.toString() != 'COMPLETED';
+        })
+        .map((m) => m['nickname']?.toString() ?? '')
+        .where((n) => n.isNotEmpty)
+        .toList();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE7DDD2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            circlePulseCopy(
+              memberCount: total,
+              completedCount: done,
+              doneNicknames: names,
+              pendingNicknames: pending,
+              iCompleted: iCompleted,
+            ),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              minHeight: 8,
+              value: total == 0 ? 0 : (done / total).clamp(0.0, 1.0),
+              backgroundColor: const Color(0xFFF0EAE3),
+              color: AppColors.moss,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

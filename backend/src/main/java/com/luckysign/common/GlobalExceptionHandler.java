@@ -46,8 +46,11 @@ public class GlobalExceptionHandler {
         String message = e.getMessage();
         if (message != null && (message.contains("Duplicate") || message.contains("UNIQUE"))) {
             log.warn("Duplicate entry conflict: {}", message);
+            String friendly = (message.contains("uk_user_checkin_date") || message.contains("uk_user_date"))
+                    ? "今日已打卡"
+                    : "数据已存在，请勿重复操作";
             return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(new ApiResponse<>(false, "数据已存在，请勿重复操作", null));
+                    .body(new ApiResponse<>(false, friendly, null));
         }
         log.error("Data integrity error", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
