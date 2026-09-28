@@ -253,3 +253,192 @@ class LocalImagePreview extends StatelessWidget {
     );
   }
 }
+
+const _weekdayShort = ['一', '二', '三', '四', '五', '六', '日'];
+
+class WeekCheckinStrip extends StatelessWidget {
+  const WeekCheckinStrip({super.key, required this.days});
+
+  final List<Map<String, dynamic>> days;
+
+  @override
+  Widget build(BuildContext context) {
+    if (days.isEmpty) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE7DDD2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('本周 7 天', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (final day in days)
+                Expanded(
+                  child: _WeekCell(date: day['date']?.toString(), status: day['status']?.toString()),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WeekCell extends StatelessWidget {
+  const _WeekCell({required this.date, required this.status});
+  final String? date;
+  final String? status;
+
+  @override
+  Widget build(BuildContext context) {
+    final parsed = DateTime.tryParse(date ?? '');
+    final label = parsed == null ? '·' : _weekdayShort[(parsed.weekday - 1) % 7];
+    final today = DateTime.now();
+    final isToday = parsed != null &&
+        parsed.year == today.year &&
+        parsed.month == today.month &&
+        parsed.day == today.day;
+    Color fill;
+    switch (status) {
+      case 'COMPLETED':
+        fill = AppColors.moss;
+        break;
+      case 'MISSED':
+        fill = const Color(0xFFE2C8BC);
+        break;
+      case 'PENDING':
+        fill = AppColors.gold;
+        break;
+      default:
+        fill = const Color(0xFFF0EAE3);
+    }
+    return Column(
+      children: [
+        Text(
+          isToday ? '今' : label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
+            color: isToday ? AppColors.accent : const Color(0xFF8A8078),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: fill,
+            shape: BoxShape.circle,
+            border: isToday ? Border.all(color: AppColors.accent, width: 1.6) : null,
+          ),
+          child: status == 'COMPLETED'
+              ? const Icon(Icons.check, size: 14, color: Colors.white)
+              : null,
+        ),
+      ],
+    );
+  }
+}
+
+class CirclePaceCard extends StatelessWidget {
+  const CirclePaceCard({
+    super.key,
+    required this.checkedCount,
+    required this.memberCount,
+    this.pendingNicknames = const [],
+    this.onlyMeLeft = false,
+    this.meCompleted = false,
+  });
+
+  final int checkedCount;
+  final int memberCount;
+  final List<String> pendingNicknames;
+  final bool onlyMeLeft;
+  final bool meCompleted;
+
+  @override
+  Widget build(BuildContext context) {
+    if (memberCount <= 0) return const SizedBox.shrink();
+    final ratio = (checkedCount / memberCount).clamp(0.0, 1.0);
+    final allDone = checkedCount >= memberCount;
+    String headline;
+    if (allDone) {
+      headline = '全员打卡，今日齐了';
+    } else if (onlyMeLeft && !meCompleted) {
+      headline = '圈子就差你了';
+    } else if (pendingNicknames.isNotEmpty) {
+      headline = '还差 ${pendingNicknames.take(3).join('、')}';
+    } else {
+      headline = '$checkedCount/$memberCount 已打卡';
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: onlyMeLeft && !meCompleted ? const Color(0xFFFFF1E6) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: onlyMeLeft && !meCompleted ? const Color(0xFFE8A87C) : const Color(0xFFE7DDD2),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                allDone ? Icons.diversity_3 : Icons.groups_2_outlined,
+                size: 20,
+                color: allDone ? AppColors.moss : AppColors.accent,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(headline, style: const TextStyle(fontWeight: FontWeight.w800)),
+              ),
+              Text(
+                '$checkedCount/$memberCount',
+                style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF8A8078)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              minHeight: 8,
+              value: ratio,
+              backgroundColor: const Color(0xFFF0EAE3),
+              color: allDone ? AppColors.moss : AppColors.accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String formatCheckedAt(String? raw) {
+  final dt = DateTime.tryParse(raw ?? '')?.toLocal();
+  if (dt == null) return '';
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(dt.hour)}:${two(dt.minute)}';
+}
+
+String streakBonusCopy(int bonus) {
+  if (bonus >= 60) return '连续满月额外 +$bonus 分';
+  if (bonus >= 50) return '连续满月额外 +$bonus 分';
+  if (bonus >= 10) return '连续满周额外 +$bonus 分';
+  return '';
+}
+
+String todayKey(DateTime time) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${time.year}-${two(time.month)}-${two(time.day)}';
+}

@@ -8,6 +8,7 @@ import com.luckysign.entity.CheckinRecord;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.entity.User;
 import com.luckysign.repository.CheckinRecordRepository;
+import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.DailyDrawRepository;
 import com.luckysign.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,6 +47,8 @@ class CheckinServiceRaceTest {
     private FileStorageService fileStorageService;
     @Mock
     private RatingService ratingService;
+    @Mock
+    private CircleMemberRepository circleMemberRepository;
 
     private CheckinService checkinService;
 
@@ -54,7 +57,7 @@ class CheckinServiceRaceTest {
         checkinService = new CheckinService(
                 userRepository, dailyDrawRepository, checkinRecordRepository,
                 pointsService, drawService, titleService, chatService,
-                fileStorageService, ratingService);
+                fileStorageService, ratingService, circleMemberRepository);
     }
 
     @Test
@@ -133,8 +136,9 @@ class CheckinServiceRaceTest {
         when(checkinRecordRepository.save(any(CheckinRecord.class)))
                 .thenThrow(new DataIntegrityViolationException("Duplicate entry for key 'uk_user_checkin_date'"));
 
-        assertThrows(DataIntegrityViolationException.class,
+        BizException ex = assertThrows(BizException.class,
                 () -> checkinService.complete(circleId, 1L, "完成任务", null));
+        assertEquals("今日已打卡", ex.getMessage());
     }
 
     private User createTestUser(Long id) {

@@ -12,9 +12,10 @@ import '../utils/refresh_gate.dart';
 import '../widgets/ui_bits.dart';
 
 class TodayScreen extends StatefulWidget {
-  const TodayScreen({super.key, this.isActive = true});
+  const TodayScreen({super.key, this.isActive = true, this.onOpenCommunity});
 
   final bool isActive;
+  final VoidCallback? onOpenCommunity;
 
   @override
   State<TodayScreen> createState() => _TodayScreenState();
@@ -26,6 +27,7 @@ class _TodayScreenState extends State<TodayScreen> {
   bool _loading = true;
   Timer? _clock;
   DateTime _now = DateTime.now();
+  DateTime? _midnightRefreshDay;
   final _gate = RefreshGate(minInterval: const Duration(seconds: 15));
 
   @override
@@ -37,6 +39,7 @@ class _TodayScreenState extends State<TodayScreen> {
     _clock = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
       setState(() => _now = DateTime.now());
+      _maybeRefreshAfterMidnight();
     });
   }
 
@@ -52,6 +55,16 @@ class _TodayScreenState extends State<TodayScreen> {
   void dispose() {
     _clock?.cancel();
     super.dispose();
+  }
+
+  void _maybeRefreshAfterMidnight() {
+    final localDay = DateTime(_now.year, _now.month, _now.day);
+    if (_midnightRefreshDay == localDay) return;
+    final loaded = _data?['date']?.toString();
+    if (loaded == null || loaded.isEmpty) return;
+    if (loaded == todayKey(_now)) return;
+    _midnightRefreshDay = localDay;
+    _load(force: true);
   }
 
   Future<void> _load({bool force = false}) {
@@ -86,143 +99,48 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   Future<void> _checkin() async {
-    final textCtrl = TextEditingController();
-    XFile? image;
-    Uint8List? previewBytes;
-    final ok = await showModalBottomSheet<bool>(
+    final data = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setLocal) {
-            return Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(color: const Color(0xFFE0D6CC), borderRadius: BorderRadius.circular(4)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text('完成打卡', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 6),
-                  const Text('凭证会发到社区，大家都能看见', style: TextStyle(color: Color(0xFF8A8078))),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: textCtrl,
-                    maxLines: 3,
-                    decoration: const InputDecoration(hintText: '可选：写点完成感受'),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
-                          if (picked == null) return;
-                          final bytes = await picked.readAsBytes();
-                          setLocal(() {
-                            image = picked;
-                            previewBytes = bytes;
-                          });
-                        },
-                        icon: const Icon(Icons.photo_outlined),
-                        label: Text(image == null ? '相册' : '已选图'),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final picked = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
-                          if (picked == null) return;
-                          final bytes = await picked.readAsBytes();
-                          setLocal(() {
-                            image = picked;
-                            previewBytes = bytes;
-                          });
-                        },
-                        icon: const Icon(Icons.photo_camera_outlined),
-                        label: const Text('拍照'),
-                      ),
-                      if (image != null) ...[
-                        const SizedBox(width: 8),
-                        TextButton(
-                          onPressed: () => setLocal(() {
-                            image = null;
-                            previewBytes = null;
-                          }),
-                          child: const Text('清除'),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (previewBytes != null) ...[
-                    const SizedBox(height: 12),
-                    LocalImagePreview(bytes: previewBytes!),
-                  ],
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('提交到社区'),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Center(child: Text('取消')),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      builder: (ctx) => const CheckinSheet(),
     );
-    if (ok != true) return;
-    try {
-      final res = await ApiClient.instance.completeCheckin(text: textCtrl.text, image: image);
-      if (!mounted) return;
-      final data = res['data'] as Map<String, dynamic>;
-      setState(() => _data = data);
-      _gate.markFresh(jsonEncode(data));
-      await _celebrateCheckin(data);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(formatError(e))),
-      );
-    }
+    if (data == null || !mounted) return;
+    setState(() => _data = data);
+    _gate.markFresh(jsonEncode(data));
+    await _celebrateCheckin(data);
   }
 
   Future<void> _celebrateCheckin(Map<String, dynamic> data) async {
     final streak = (data['streakDays'] is num) ? (data['streakDays'] as num).toInt() : 0;
     final next = data['nextTitle']?.toString();
     final daysTo = (data['daysToNextTitle'] is num) ? (data['daysToNextTitle'] as num).toInt() : 0;
+    final bonus = (data['streakBonusPoints'] is num) ? (data['streakBonusPoints'] as num).toInt() : 0;
+    final bonusText = streakBonusCopy(bonus);
     if (!mounted) return;
-    await showDialog<void>(
+    final goCommunity = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('打卡成功'),
         content: Text(
-          streak > 1
-              ? '连续 $streak 天！凭证已发到社区。${next != null && next.isNotEmpty ? '\n再坚持 $daysTo 天可解锁「$next」。' : ''}'
-              : '今日任务完成，凭证已发到社区。',
+          [
+            if (streak > 1) '连续 $streak 天！凭证已发到社区。' else '今日任务完成，凭证已发到社区。',
+            if (bonusText.isNotEmpty) bonusText,
+            if (next != null && next.isNotEmpty) '再坚持 $daysTo 天可解锁「$next」。',
+          ].join('\n'),
         ),
         actions: [
-          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('好')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('留下')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('去社区看看')),
         ],
       ),
     );
     if (!mounted) return;
+    if (goCommunity == true) {
+      widget.onOpenCommunity?.call();
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('打卡成功，已发到社区')));
   }
 
@@ -254,6 +172,11 @@ class _TodayScreenState extends State<TodayScreen> {
     final color = AppColors.level(level);
     final completed = d?['status'] == 'COMPLETED';
     final dormant = d?['tag'] == 'DORMANT' || (_error?.contains('休眠') ?? false);
+    final weekDays = (d?['weekDays'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final circle = d?['circleProgress'] as Map<String, dynamic>?;
+    final checkedAt = formatCheckedAt(d?['checkedAt']?.toString());
+    final bonus = (d?['streakBonusPoints'] is num) ? (d!['streakBonusPoints'] as num).toInt() : 0;
+    final bonusText = completed ? streakBonusCopy(bonus) : '';
 
     return Scaffold(
       appBar: AppBar(
@@ -349,6 +272,23 @@ class _TodayScreenState extends State<TodayScreen> {
                   ),
                 ],
               ),
+              if (weekDays.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                WeekCheckinStrip(days: weekDays),
+              ],
+              if (circle != null) ...[
+                const SizedBox(height: 12),
+                CirclePaceCard(
+                  checkedCount: (circle['checkedCount'] as num?)?.toInt() ?? 0,
+                  memberCount: (circle['memberCount'] as num?)?.toInt() ?? 0,
+                  pendingNicknames: ((circle['pendingNicknames'] as List?) ?? const [])
+                      .map((e) => e.toString())
+                      .where((e) => e.isNotEmpty)
+                      .toList(),
+                  onlyMeLeft: circle['onlyMeLeft'] == true,
+                  meCompleted: completed,
+                ),
+              ],
               const SizedBox(height: 16),
               if (!completed && !dormant) ...[
                 Container(
@@ -436,6 +376,14 @@ class _TodayScreenState extends State<TodayScreen> {
                         ),
                       ],
                     ),
+                    if (completed && bonusText.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(bonusText, style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.w700)),
+                    ],
+                    if (completed && checkedAt.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text('打卡于 $checkedAt', style: const TextStyle(color: Color(0xFF8A8078), fontSize: 13)),
+                    ],
                     if (completed && (d['textContent']?.toString().isNotEmpty ?? false)) ...[
                       const SizedBox(height: 12),
                       Text(d['textContent'].toString(), style: const TextStyle(color: Color(0xFF6B625A), height: 1.35)),
@@ -452,9 +400,9 @@ class _TodayScreenState extends State<TodayScreen> {
                 height: 52,
                 child: completed
                     ? FilledButton.icon(
-                        onPressed: null,
-                        icon: const Icon(Icons.check_circle),
-                        label: const Text('今日已完成 ✓'),
+                        onPressed: widget.onOpenCommunity,
+                        icon: const Icon(Icons.forum_outlined),
+                        label: const Text('今日已完成 · 去社区'),
                       )
                     : FilledButton(
                         style: FilledButton.styleFrom(
@@ -468,6 +416,165 @@ class _TodayScreenState extends State<TodayScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class CheckinSheet extends StatefulWidget {
+  const CheckinSheet({super.key, this.onSubmit});
+
+  /// 测试可注入；默认走真实打卡接口。
+  final Future<Map<String, dynamic>> Function(String text, XFile? image)? onSubmit;
+
+  @override
+  State<CheckinSheet> createState() => _CheckinSheetState();
+}
+
+class _CheckinSheetState extends State<CheckinSheet> {
+  final _textCtrl = TextEditingController();
+  XFile? _image;
+  Uint8List? _previewBytes;
+  bool _submitting = false;
+  String? _error;
+
+  static const _maxImageBytes = 5 * 1024 * 1024;
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pick(ImageSource source) async {
+    final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    if (bytes.length > _maxImageBytes) {
+      setState(() => _error = '图片不能超过 5MB');
+      return;
+    }
+    setState(() {
+      _image = picked;
+      _previewBytes = bytes;
+      _error = null;
+    });
+  }
+
+  Future<void> _submit() async {
+    final text = _textCtrl.text.trim();
+    if (text.isEmpty && _image == null) {
+      setState(() => _error = '写点感受或加一张图再提交');
+      return;
+    }
+    if (_submitting) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      final submit = widget.onSubmit ??
+          ((t, img) async {
+            final res = await ApiClient.instance.completeCheckin(text: t, image: img);
+            return res['data'] as Map<String, dynamic>;
+          });
+      final data = await submit(_textCtrl.text, _image);
+      if (!mounted) return;
+      Navigator.pop(context, data);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = formatError(e);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(color: const Color(0xFFE0D6CC), borderRadius: BorderRadius.circular(4)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('完成打卡', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          const Text('凭证会发到社区，大家都能看见', style: TextStyle(color: Color(0xFF8A8078))),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _textCtrl,
+            maxLines: 3,
+            maxLength: 500,
+            enabled: !_submitting,
+            decoration: const InputDecoration(hintText: '可选：写点完成感受'),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _submitting ? null : () => _pick(ImageSource.gallery),
+                icon: const Icon(Icons.photo_outlined),
+                label: Text(_image == null ? '相册' : '已选图'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _submitting ? null : () => _pick(ImageSource.camera),
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('拍照'),
+              ),
+              if (_image != null) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: _submitting
+                      ? null
+                      : () => setState(() {
+                            _image = null;
+                            _previewBytes = null;
+                          }),
+                  child: const Text('清除'),
+                ),
+              ],
+            ],
+          ),
+          if (_previewBytes != null) ...[
+            const SizedBox(height: 12),
+            LocalImagePreview(bytes: _previewBytes!),
+          ],
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
+          ],
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
+              onPressed: _submitting ? null : _submit,
+              child: _submitting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('提交到社区'),
+            ),
+          ),
+          TextButton(
+            onPressed: _submitting ? null : () => Navigator.pop(context),
+            child: const Center(child: Text('取消')),
+          ),
+        ],
       ),
     );
   }

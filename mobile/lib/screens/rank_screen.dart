@@ -18,6 +18,7 @@ class RankScreen extends StatefulWidget {
 class _RankScreenState extends State<RankScreen> {
   Map<String, dynamic>? _data;
   String? _error;
+  bool _loading = true;
   final _gate = RefreshGate(minInterval: const Duration(seconds: 30));
 
   @override
@@ -38,6 +39,12 @@ class _RankScreenState extends State<RankScreen> {
 
   Future<void> _load({bool force = false}) {
     return _gate.run(() async {
+      if (_data == null && mounted) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+      }
       try {
         final res = await ApiClient.instance.getJson('/api/rank');
         if (!mounted) return;
@@ -53,6 +60,8 @@ class _RankScreenState extends State<RankScreen> {
       } catch (e) {
         if (!mounted) return;
         setState(() => _error = formatError(e));
+      } finally {
+        if (mounted && _loading) setState(() => _loading = false);
       }
     }, force: force);
   }
@@ -63,6 +72,7 @@ class _RankScreenState extends State<RankScreen> {
     final byPoints = (_data?['byPoints'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     final byStreak = (_data?['byStreak'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     final star = _data?['luckyStar'] as Map<String, dynamic>?;
+    final pace = _circlePace();
 
     return DefaultTabController(
       length: 3,
@@ -89,6 +99,8 @@ class _RankScreenState extends State<RankScreen> {
                 padding: const EdgeInsets.all(12),
                 child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
               ),
+            if (_loading && _data == null)
+              const LinearProgressIndicator(minHeight: 2),
             if (star != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -114,6 +126,11 @@ class _RankScreenState extends State<RankScreen> {
                   ),
                 ),
               ),
+            if (pace != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: pace,
+              ),
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Text(
@@ -136,7 +153,47 @@ class _RankScreenState extends State<RankScreen> {
     );
   }
 
+  Widget? _circlePace() {
+    final items = (_data?['byComposite'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    if (items.isEmpty) return null;
+    final me = ApiClient.instance.userId;
+    var checked = 0;
+    var members = 0;
+    final pending = <String>[];
+    var meCompleted = false;
+    var mePending = false;
+    for (final m in items) {
+      if (m['tag']?.toString() == 'DORMANT') continue;
+      members++;
+      final done = m['todayStatus']?.toString() == 'COMPLETED';
+      final uid = m['userId'];
+      final isMe = me != null && uid is num && uid.toInt() == me;
+      if (done) {
+        checked++;
+        if (isMe) meCompleted = true;
+      } else if (isMe) {
+        mePending = true;
+      } else {
+        final name = m['nickname']?.toString() ?? '';
+        if (name.isNotEmpty && pending.length < 5) pending.add(name);
+      }
+    }
+    return CirclePaceCard(
+      checkedCount: checked,
+      memberCount: members,
+      pendingNicknames: pending,
+      onlyMeLeft: mePending && pending.isEmpty && members - checked == 1,
+      meCompleted: meCompleted,
+    );
+  }
+
   Widget _list(List<Map<String, dynamic>> items, {required _RankMode mode}) {
+    if (_data == null && _error != null) {
+      return const SizedBox.shrink();
+    }
+    if (_data == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
     if (items.isEmpty) {
       return RefreshIndicator(
         onRefresh: () => _load(force: true),
@@ -231,3 +288,10 @@ class _RankScreenState extends State<RankScreen> {
 }
 
 enum _RankMode { composite, points, streak }
+
+/// 排行列表空态：仅在已成功拿到数据且列表为空时显示「暂无成员」。
+String? rankEmptyLabel({required bool hasData, required bool isEmpty}) {
+  if (!hasData) return null;
+  if (isEmpty) return '暂无成员';
+  return null;
+}

@@ -33,7 +33,11 @@ public class DailyJobs {
     public void generateDraws() {
         log.info("Generating daily draws for all circles...");
         for (Circle circle : circleRepository.findAll()) {
-            drawService.generateForAllActiveUsers(circle.getId());
+            try {
+                drawService.generateForAllActiveUsers(circle.getId());
+            } catch (Exception e) {
+                log.error("Generate draws failed circleId={}", circle.getId(), e);
+            }
         }
     }
 
