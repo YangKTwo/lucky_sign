@@ -7,18 +7,25 @@ import com.luckysign.domain.UserTag;
 import com.luckysign.dto.CheckinDtos;
 import com.luckysign.dto.RatingDtos;
 import com.luckysign.entity.CheckinRecord;
+import com.luckysign.entity.CircleMember;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.entity.User;
 import com.luckysign.repository.CheckinRecordRepository;
+import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.DailyDrawRepository;
 import com.luckysign.repository.UserRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class CheckinService {
@@ -31,6 +38,7 @@ public class CheckinService {
     private final ChatService chatService;
     private final FileStorageService fileStorageService;
     private final RatingService ratingService;
+    private final CircleMemberRepository circleMemberRepository;
 
     public CheckinService(UserRepository userRepository,
                           DailyDrawRepository dailyDrawRepository,
@@ -40,7 +48,8 @@ public class CheckinService {
                           TitleService titleService,
                           ChatService chatService,
                           FileStorageService fileStorageService,
-                          RatingService ratingService) {
+                          RatingService ratingService,
+                          CircleMemberRepository circleMemberRepository) {
         this.userRepository = userRepository;
         this.dailyDrawRepository = dailyDrawRepository;
         this.checkinRecordRepository = checkinRecordRepository;
@@ -50,6 +59,7 @@ public class CheckinService {
         this.chatService = chatService;
         this.fileStorageService = fileStorageService;
         this.ratingService = ratingService;
+        this.circleMemberRepository = circleMemberRepository;
     }
 
     @Transactional
@@ -64,7 +74,7 @@ public class CheckinService {
             draw.setStatus(DrawStatus.VIEWED);
             dailyDrawRepository.save(draw);
         }
-        return toToday(user, draw);
+        return toToday(user, draw, circleId);
     }
 
     @Transactional
@@ -131,10 +141,14 @@ public class CheckinService {
         record.setImageUrl(imageUrl);
         record.setPointsEarned(reward);
         record.setStreakSnapshot(newStreak);
-        record = checkinRecordRepository.save(record);
+        try {
+            record = checkinRecordRepository.save(record);
+        } catch (DataIntegrityViolationException e) {
+            throw new BizException("今日已打卡");
+        }
 
         chatService.postCheckin(circleId, user, record, draw);
-        return toToday(user, draw, record.getImageUrl(), record.getTextContent());
+        return toToday(user, draw, circleId, record.getImageUrl(), record.getTextContent(), record.getCreatedAt());
     }
 
     public CheckinDtos.HistoryResponse history(Long circleId, Long userId) {
@@ -194,20 +208,44 @@ public class CheckinService {
         pointsService.apply(user, delta, type, relatedId);
     }
 
-    private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw) {
+    private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw, Long circleId) {
         String imageUrl = null;
         String textContent = null;
+        Instant checkedAt = null;
         if (draw.getStatus() == DrawStatus.COMPLETED) {
             var record = checkinRecordRepository.findByUserIdAndCheckinDate(user.getId(), draw.getDrawDate());
             if (record.isPresent()) {
                 imageUrl = record.get().getImageUrl();
                 textContent = record.get().getTextContent();
+                checkedAt = record.get().getCreatedAt();
             }
         }
-        return toToday(user, draw, imageUrl, textContent);
+        return toToday(user, draw, circleId, imageUrl, textContent, checkedAt);
     }
 
-    private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw, String imageUrl, String textContent) {
+    private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw, Long circleId,
+                                             String imageUrl, String textContent, Instant checkedAt) {
+        List<CheckinDtos.CalendarDay> weekDays = List.of();
+        try {
+            weekDays = calendar(user.getId(), 7).days();
+        } catch (Exception ignored) {
+            // 周进度失败不阻断今日主路径
+        }
+        CheckinDtos.CircleProgress circleProgress = new CheckinDtos.CircleProgress(0, 0, List.of(), false);
+        try {
+            circleProgress = circleProgress(circleId, user.getId(), draw.getDrawDate());
+        } catch (Exception ignored) {
+            // 圈子进度失败不阻断今日主路径
+        }
+        int streakBonus = 0;
+        if (draw.getStatus() == DrawStatus.COMPLETED && user.getStreakDays() != null && user.getStreakDays() > 0) {
+            if (user.getStreakDays() % 7 == 0) {
+                streakBonus += 10;
+            }
+            if (user.getStreakDays() % 30 == 0) {
+                streakBonus += 50;
+            }
+        }
         return new CheckinDtos.TodayResponse(
                 draw.getDrawDate(),
                 draw.getLevel(),
@@ -227,7 +265,48 @@ public class CheckinService {
                 titleService.nextTitleAt(user.getTotalCompletedDays()),
                 user.getTag().name(),
                 imageUrl,
-                textContent
+                textContent,
+                checkedAt,
+                streakBonus,
+                weekDays,
+                circleProgress
         );
+    }
+
+    private CheckinDtos.CircleProgress circleProgress(Long circleId, Long userId, LocalDate date) {
+        if (circleId == null) {
+            return new CheckinDtos.CircleProgress(0, 0, List.of(), false);
+        }
+        List<CircleMember> members = circleMemberRepository.findByCircleId(circleId);
+        if (members == null || members.isEmpty()) {
+            return new CheckinDtos.CircleProgress(0, 0, List.of(), false);
+        }
+        Map<Long, User> users = userRepository.findAllById(members.stream().map(CircleMember::getUserId).toList())
+                .stream().collect(Collectors.toMap(User::getId, Function.identity(), (a, b) -> a));
+        Map<Long, DailyDraw> draws = dailyDrawRepository.findByDrawDate(date).stream()
+                .collect(Collectors.toMap(DailyDraw::getUserId, Function.identity(), (a, b) -> a));
+        int checked = 0;
+        int total = 0;
+        List<String> pending = new ArrayList<>();
+        boolean mePending = false;
+        for (CircleMember member : members) {
+            User u = users.get(member.getUserId());
+            if (u == null || u.getTag() == UserTag.DORMANT) {
+                continue;
+            }
+            total++;
+            DailyDraw d = draws.get(u.getId());
+            if (d != null && d.getStatus() == DrawStatus.COMPLETED) {
+                checked++;
+            } else {
+                if (u.getId().equals(userId)) {
+                    mePending = true;
+                } else if (pending.size() < 5) {
+                    pending.add(u.getNickname());
+                }
+            }
+        }
+        boolean onlyMeLeft = mePending && pending.isEmpty() && total - checked == 1;
+        return new CheckinDtos.CircleProgress(checked, total, pending, onlyMeLeft);
     }
 }

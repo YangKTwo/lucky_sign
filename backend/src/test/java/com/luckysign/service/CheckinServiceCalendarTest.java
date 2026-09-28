@@ -4,6 +4,7 @@ import com.luckysign.domain.DrawStatus;
 import com.luckysign.dto.CheckinDtos;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.repository.CheckinRecordRepository;
+import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.DailyDrawRepository;
 import com.luckysign.repository.UserRepository;
 import org.junit.jupiter.api.Test;
@@ -43,7 +44,7 @@ class CheckinServiceCalendarTest {
         CheckinService service = new CheckinService(
                 userRepository, dailyDrawRepository, checkinRecordRepository,
                 pointsService, drawService, titleService, chatService,
-                fileStorageService, ratingService);
+                fileStorageService, ratingService, org.mockito.Mockito.mock(CircleMemberRepository.class));
         LocalDate today = LocalDate.of(2026, 9, 11);
         when(drawService.today()).thenReturn(today);
 
