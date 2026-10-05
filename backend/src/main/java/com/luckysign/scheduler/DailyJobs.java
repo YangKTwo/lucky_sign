@@ -33,14 +33,22 @@ public class DailyJobs {
     public void generateDraws() {
         log.info("Generating daily draws for all circles...");
         for (Circle circle : circleRepository.findAll()) {
-            drawService.generateForAllActiveUsers(circle.getId());
+            try {
+                drawService.generateForAllActiveUsers(circle.getId());
+            } catch (Exception e) {
+                log.error("Generating draws failed for circle {}", circle.getId(), e);
+            }
         }
     }
 
     @Scheduled(cron = "0 10 0 * * *", zone = "Asia/Shanghai")
     public void settle() {
         log.info("Settling yesterday misses...");
-        settlementService.settleYesterday();
+        try {
+            settlementService.settleYesterday();
+        } catch (Exception e) {
+            log.error("Settlement job failed", e);
+        }
     }
 
     @Scheduled(cron = "0 0 8 * * *", zone = "Asia/Shanghai")

@@ -10,7 +10,9 @@ import com.luckysign.repository.DailyDrawRepository;
 import com.luckysign.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -28,6 +30,7 @@ public class SettlementService {
     private final TitleService titleService;
     private final MailNotifyService mailNotifyService;
     private final ChatService chatService;
+    private final SettlementService self;
 
     public SettlementService(DailyDrawRepository dailyDrawRepository,
                              UserRepository userRepository,
@@ -36,7 +39,8 @@ public class SettlementService {
                              DrawService drawService,
                              TitleService titleService,
                              MailNotifyService mailNotifyService,
-                             ChatService chatService) {
+                             ChatService chatService,
+                             @Lazy SettlementService self) {
         this.dailyDrawRepository = dailyDrawRepository;
         this.userRepository = userRepository;
         this.circleMemberRepository = circleMemberRepository;
@@ -45,50 +49,67 @@ public class SettlementService {
         this.titleService = titleService;
         this.mailNotifyService = mailNotifyService;
         this.chatService = chatService;
+        this.self = self;
     }
 
-    @Transactional
     public void settleYesterday() {
         LocalDate yesterday = drawService.today().minusDays(1);
         List<DailyDraw> draws = dailyDrawRepository.findByDrawDate(yesterday);
         for (DailyDraw draw : draws) {
-            if (draw.getStatus() == DrawStatus.COMPLETED) {
-                continue;
+            try {
+                target().settleOne(draw.getId());
+            } catch (Exception e) {
+                log.error("Settle failed drawId={} date={}", draw.getId(), yesterday, e);
             }
-            User user = userRepository.findById(draw.getUserId()).orElse(null);
-            if (user == null || user.getTag() == UserTag.DORMANT) {
-                draw.setStatus(DrawStatus.EXPIRED);
-                dailyDrawRepository.save(draw);
-                continue;
-            }
+        }
+    }
 
-            int penalty = drawService.rewardPoints(draw) / 2;
-            if (penalty > 0) {
-                pointsService.apply(user, -penalty, PointChangeType.PENALTY, draw.getId());
-            }
-
-            user.setStreakDays(0);
-            user.setMissStreakDays(user.getMissStreakDays() + 1);
-
-            if (user.getMissStreakDays() >= 7) {
-                user.setTag(UserTag.DORMANT);
-                mailNotifyService.sendWarning(user.getEmail(), "账号已休眠",
-                        "你已连续7天未完成任务，账号进入休眠并禁言，请联系管理员解锁。");
-                for (Long cid : circleMemberRepository.findCircleIdsByUserId(user.getId())) {
-                    chatService.postSystem(cid, user.getNickname() + " 因连续7天未完成进入休眠");
-                }
-            } else if (user.getMissStreakDays() >= 3) {
-                pointsService.resetToZero(user, PointChangeType.RESET_ZERO, draw.getId());
-                user.setTag(UserTag.DROPPED);
-                mailNotifyService.sendWarning(user.getEmail(), "掉签警告",
-                        "你已连续3天未完成任务，积分已清零并标记为掉签。");
-            }
-
-            user.setTitle(titleService.resolve(user.getTotalCompletedDays()));
-            userRepository.save(user);
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void settleOne(Long drawId) {
+        DailyDraw draw = dailyDrawRepository.findById(drawId).orElse(null);
+        if (draw == null) {
+            return;
+        }
+        if (draw.getStatus() == DrawStatus.COMPLETED || draw.getStatus() == DrawStatus.EXPIRED) {
+            return;
+        }
+        User user = userRepository.findById(draw.getUserId()).orElse(null);
+        if (user == null || user.getTag() == UserTag.DORMANT) {
             draw.setStatus(DrawStatus.EXPIRED);
             dailyDrawRepository.save(draw);
-            log.info("Settled miss userId={} date={} missStreak={}", user.getId(), yesterday, user.getMissStreakDays());
+            return;
         }
+
+        int penalty = drawService.rewardPoints(draw) / 2;
+        if (penalty > 0) {
+            pointsService.apply(user, -penalty, PointChangeType.PENALTY, draw.getId());
+        }
+
+        user.setStreakDays(0);
+        user.setMissStreakDays(user.getMissStreakDays() + 1);
+
+        if (user.getMissStreakDays() >= 7) {
+            user.setTag(UserTag.DORMANT);
+            mailNotifyService.sendWarning(user.getEmail(), "账号已休眠",
+                    "你已连续7天未完成任务，账号进入休眠并禁言，请联系管理员解锁。");
+            for (Long cid : circleMemberRepository.findCircleIdsByUserId(user.getId())) {
+                chatService.postSystem(cid, user.getNickname() + " 因连续7天未完成进入休眠");
+            }
+        } else if (user.getMissStreakDays() >= 3) {
+            pointsService.resetToZero(user, PointChangeType.RESET_ZERO, draw.getId());
+            user.setTag(UserTag.DROPPED);
+            mailNotifyService.sendWarning(user.getEmail(), "掉签警告",
+                    "你已连续3天未完成任务，积分已清零并标记为掉签。");
+        }
+
+        user.setTitle(titleService.resolve(user.getTotalCompletedDays()));
+        userRepository.save(user);
+        draw.setStatus(DrawStatus.EXPIRED);
+        dailyDrawRepository.save(draw);
+        log.info("Settled miss userId={} date={} missStreak={}", user.getId(), draw.getDrawDate(), user.getMissStreakDays());
+    }
+
+    private SettlementService target() {
+        return self != null ? self : this;
     }
 }

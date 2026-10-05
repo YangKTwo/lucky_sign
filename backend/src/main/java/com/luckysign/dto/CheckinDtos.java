@@ -3,6 +3,7 @@ package com.luckysign.dto;
 import com.luckysign.domain.DrawStatus;
 import com.luckysign.domain.FortuneLevel;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -26,7 +27,18 @@ public class CheckinDtos {
             Integer nextTitleAt,
             String tag,
             String imageUrl,
-            String textContent
+            String textContent,
+            List<CalendarDay> weekDays,
+            CircleProgress circleProgress,
+            Instant completedAt
+    ) {
+    }
+
+    public record CircleProgress(
+            int completed,
+            int total,
+            List<String> pendingNicknames,
+            boolean justYou
     ) {
     }
 
