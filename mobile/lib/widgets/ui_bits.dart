@@ -195,13 +195,13 @@ class SettingsTile extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
-    required this.onTap,
+    this.onTap,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -231,7 +231,7 @@ class SettingsTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, color: Color(0xFFB0A69C)),
+              if (onTap != null) const Icon(Icons.chevron_right, color: Color(0xFFB0A69C)),
             ],
           ),
         ),

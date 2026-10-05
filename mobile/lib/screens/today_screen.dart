@@ -9,12 +9,14 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
 import '../utils/refresh_gate.dart';
+import '../utils/today_copy.dart';
 import '../widgets/ui_bits.dart';
 
 class TodayScreen extends StatefulWidget {
-  const TodayScreen({super.key, this.isActive = true});
+  const TodayScreen({super.key, this.isActive = true, this.onOpenCommunity});
 
   final bool isActive;
+  final VoidCallback? onOpenCommunity;
 
   @override
   State<TodayScreen> createState() => _TodayScreenState();
@@ -36,7 +38,13 @@ class _TodayScreenState extends State<TodayScreen> {
     }
     _clock = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
-      setState(() => _now = DateTime.now());
+      final next = DateTime.now();
+      final crossed = todayDateKey(next) != todayDateKey(_now);
+      final stale = _data != null && _data!['date']?.toString() != todayDateKey(next);
+      setState(() => _now = next);
+      if (crossed || stale) {
+        _load(force: true);
+      }
     });
   }
 
@@ -44,7 +52,8 @@ class _TodayScreenState extends State<TodayScreen> {
   void didUpdateWidget(covariant TodayScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.isActive && !oldWidget.isActive) {
-      _load();
+      final stale = _data != null && _data!['date']?.toString() != todayDateKey(DateTime.now());
+      _load(force: stale);
     }
   }
 
@@ -86,121 +95,17 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   Future<void> _checkin() async {
-    final textCtrl = TextEditingController();
-    XFile? image;
-    Uint8List? previewBytes;
-    final ok = await showModalBottomSheet<bool>(
+    final data = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setLocal) {
-            return Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(color: const Color(0xFFE0D6CC), borderRadius: BorderRadius.circular(4)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text('完成打卡', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 6),
-                  const Text('凭证会发到社区，大家都能看见', style: TextStyle(color: Color(0xFF8A8078))),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: textCtrl,
-                    maxLines: 3,
-                    decoration: const InputDecoration(hintText: '可选：写点完成感受'),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
-                          if (picked == null) return;
-                          final bytes = await picked.readAsBytes();
-                          setLocal(() {
-                            image = picked;
-                            previewBytes = bytes;
-                          });
-                        },
-                        icon: const Icon(Icons.photo_outlined),
-                        label: Text(image == null ? '相册' : '已选图'),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final picked = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
-                          if (picked == null) return;
-                          final bytes = await picked.readAsBytes();
-                          setLocal(() {
-                            image = picked;
-                            previewBytes = bytes;
-                          });
-                        },
-                        icon: const Icon(Icons.photo_camera_outlined),
-                        label: const Text('拍照'),
-                      ),
-                      if (image != null) ...[
-                        const SizedBox(width: 8),
-                        TextButton(
-                          onPressed: () => setLocal(() {
-                            image = null;
-                            previewBytes = null;
-                          }),
-                          child: const Text('清除'),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (previewBytes != null) ...[
-                    const SizedBox(height: 12),
-                    LocalImagePreview(bytes: previewBytes!),
-                  ],
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('提交到社区'),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Center(child: Text('取消')),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      builder: (ctx) => const _CheckinSheet(),
     );
-    if (ok != true) return;
-    try {
-      final res = await ApiClient.instance.completeCheckin(text: textCtrl.text, image: image);
-      if (!mounted) return;
-      final data = res['data'] as Map<String, dynamic>;
-      setState(() => _data = data);
-      _gate.markFresh(jsonEncode(data));
-      await _celebrateCheckin(data);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(formatError(e))),
-      );
-    }
+    if (data == null || !mounted) return;
+    setState(() => _data = data);
+    _gate.markFresh(jsonEncode(data));
+    await _celebrateCheckin(data);
   }
 
   Future<void> _celebrateCheckin(Map<String, dynamic> data) async {
@@ -208,21 +113,25 @@ class _TodayScreenState extends State<TodayScreen> {
     final next = data['nextTitle']?.toString();
     final daysTo = (data['daysToNextTitle'] is num) ? (data['daysToNextTitle'] as num).toInt() : 0;
     if (!mounted) return;
-    await showDialog<void>(
+    final goCommunity = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('打卡成功'),
-        content: Text(
-          streak > 1
-              ? '连续 $streak 天！凭证已发到社区。${next != null && next.isNotEmpty ? '\n再坚持 $daysTo 天可解锁「$next」。' : ''}'
-              : '今日任务完成，凭证已发到社区。',
-        ),
+        content: Text(celebrateCheckinBody(streak: streak, nextTitle: next, daysToNext: daysTo)),
         actions: [
-          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('好')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('去社区看看'),
+          ),
+          FilledButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('好')),
         ],
       ),
     );
     if (!mounted) return;
+    if (goCommunity == true) {
+      widget.onOpenCommunity?.call();
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('打卡成功，已发到社区')));
   }
 
@@ -350,6 +259,10 @@ class _TodayScreenState extends State<TodayScreen> {
                 ],
               ),
               const SizedBox(height: 16),
+              _WeekStrip(days: (d['weekDays'] as List?)?.cast<Map<String, dynamic>>() ?? const []),
+              const SizedBox(height: 12),
+              _CircleProgressCard(progress: d['circleProgress'] as Map<String, dynamic>?),
+              const SizedBox(height: 16),
               if (!completed && !dormant) ...[
                 Container(
                   width: double.infinity,
@@ -436,6 +349,13 @@ class _TodayScreenState extends State<TodayScreen> {
                         ),
                       ],
                     ),
+                    if (completed) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        formatCompletedAt(d['completedAt']?.toString(), now: _now) ?? '今日已打卡',
+                        style: const TextStyle(fontSize: 13, color: AppColors.moss, fontWeight: FontWeight.w700),
+                      ),
+                    ],
                     if (completed && (d['textContent']?.toString().isNotEmpty ?? false)) ...[
                       const SizedBox(height: 12),
                       Text(d['textContent'].toString(), style: const TextStyle(color: Color(0xFF6B625A), height: 1.35)),
@@ -452,9 +372,9 @@ class _TodayScreenState extends State<TodayScreen> {
                 height: 52,
                 child: completed
                     ? FilledButton.icon(
-                        onPressed: null,
-                        icon: const Icon(Icons.check_circle),
-                        label: const Text('今日已完成 ✓'),
+                        onPressed: widget.onOpenCommunity,
+                        icon: const Icon(Icons.forum_outlined),
+                        label: const Text('今日已完成 · 去社区'),
                       )
                     : FilledButton(
                         style: FilledButton.styleFrom(
@@ -468,6 +388,264 @@ class _TodayScreenState extends State<TodayScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _WeekStrip extends StatelessWidget {
+  const _WeekStrip({required this.days});
+  final List<Map<String, dynamic>> days;
+
+  static const _labels = ['一', '二', '三', '四', '五', '六', '日'];
+
+  Color _color(String? status) {
+    switch (status) {
+      case 'COMPLETED':
+        return AppColors.moss;
+      case 'MISSED':
+        return const Color(0xFFE2C8BC);
+      case 'PENDING':
+        return AppColors.gold;
+      default:
+        return const Color(0xFFF0EAE3);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (days.length != 7) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE7DDD2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('本周', style: TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (var i = 0; i < 7; i++)
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text(_labels[i], style: const TextStyle(fontSize: 11, color: Color(0xFF8A8078))),
+                      const SizedBox(height: 6),
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: _color(days[i]['status']?.toString()),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        alignment: Alignment.center,
+                        child: days[i]['status'] == 'COMPLETED'
+                            ? const Icon(Icons.check, size: 16, color: Colors.white)
+                            : null,
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CircleProgressCard extends StatelessWidget {
+  const _CircleProgressCard({required this.progress});
+  final Map<String, dynamic>? progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = progress;
+    if (p == null) return const SizedBox.shrink();
+    final completed = (p['completed'] is num) ? (p['completed'] as num).toInt() : 0;
+    final total = (p['total'] is num) ? (p['total'] as num).toInt() : 0;
+    final pending = (p['pendingNicknames'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[];
+    final justYou = p['justYou'] == true;
+    final message = circleProgressMessage(
+      completed: completed,
+      total: total,
+      pendingNicknames: pending,
+      justYou: justYou,
+    );
+    final ratio = total <= 0 ? 0.0 : (completed / total).clamp(0.0, 1.0);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: justYou ? const Color(0xFFFFF1E6) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: justYou ? const Color(0xFFE8A87C) : const Color(0xFFE7DDD2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            total > 0 ? '圈子打卡 $completed/$total' : '圈子打卡',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              minHeight: 8,
+              value: ratio,
+              backgroundColor: const Color(0xFFF0EAE3),
+              color: justYou ? AppColors.accent : AppColors.moss,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(message, style: const TextStyle(fontSize: 13, color: Color(0xFF6B625A), height: 1.35)),
+        ],
+      ),
+    );
+  }
+}
+
+class _CheckinSheet extends StatefulWidget {
+  const _CheckinSheet();
+
+  @override
+  State<_CheckinSheet> createState() => _CheckinSheetState();
+}
+
+class _CheckinSheetState extends State<_CheckinSheet> {
+  final _textCtrl = TextEditingController();
+  XFile? _image;
+  Uint8List? _previewBytes;
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pick(ImageSource source) async {
+    final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (bytes.length > maxCheckinImageBytes) {
+      if (!mounted) return;
+      setState(() => _error = '图片不能超过 5MB');
+      return;
+    }
+    setState(() {
+      _image = picked;
+      _previewBytes = bytes;
+      _error = null;
+    });
+  }
+
+  Future<void> _submit() async {
+    if (_submitting) return;
+    if (!canSubmitCheckin(text: _textCtrl.text, hasImage: _image != null)) {
+      setState(() => _error = '请写点感受或选一张图');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      final res = await ApiClient.instance.completeCheckin(text: _textCtrl.text, image: _image);
+      if (!mounted) return;
+      Navigator.pop(context, res['data'] as Map<String, dynamic>);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = formatError(e);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(color: const Color(0xFFE0D6CC), borderRadius: BorderRadius.circular(4)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('完成打卡', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          const Text('写点感受或拍一张，凭证会发到社区', style: TextStyle(color: Color(0xFF8A8078))),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _textCtrl,
+            maxLines: 3,
+            maxLength: 500,
+            decoration: const InputDecoration(hintText: '写点完成感受，或配一张图'),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _submitting ? null : () => _pick(ImageSource.gallery),
+                icon: const Icon(Icons.photo_outlined),
+                label: Text(_image == null ? '相册' : '已选图'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _submitting ? null : () => _pick(ImageSource.camera),
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('拍照'),
+              ),
+              if (_image != null) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: _submitting
+                      ? null
+                      : () => setState(() {
+                            _image = null;
+                            _previewBytes = null;
+                          }),
+                  child: const Text('清除'),
+                ),
+              ],
+            ],
+          ),
+          if (_previewBytes != null) ...[
+            const SizedBox(height: 12),
+            LocalImagePreview(bytes: _previewBytes!),
+          ],
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
+          ],
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
+              onPressed: _submitting ? null : _submit,
+              child: Text(_submitting ? '提交中…' : '提交到社区'),
+            ),
+          ),
+          TextButton(
+            onPressed: _submitting ? null : () => Navigator.pop(context),
+            child: const Center(child: Text('取消')),
+          ),
+        ],
       ),
     );
   }

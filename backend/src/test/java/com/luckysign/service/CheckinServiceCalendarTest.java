@@ -37,13 +37,15 @@ class CheckinServiceCalendarTest {
     private FileStorageService fileStorageService;
     @Mock
     private RatingService ratingService;
+    @Mock
+    private com.luckysign.repository.CircleMemberRepository circleMemberRepository;
 
     @Test
     void calendarMarksCompletedMissedAndPending() {
         CheckinService service = new CheckinService(
                 userRepository, dailyDrawRepository, checkinRecordRepository,
                 pointsService, drawService, titleService, chatService,
-                fileStorageService, ratingService);
+                fileStorageService, ratingService, circleMemberRepository);
         LocalDate today = LocalDate.of(2026, 9, 11);
         when(drawService.today()).thenReturn(today);
 

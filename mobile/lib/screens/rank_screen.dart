@@ -18,6 +18,7 @@ class RankScreen extends StatefulWidget {
 class _RankScreenState extends State<RankScreen> {
   Map<String, dynamic>? _data;
   String? _error;
+  bool _loading = true;
   final _gate = RefreshGate(minInterval: const Duration(seconds: 30));
 
   @override
@@ -38,6 +39,13 @@ class _RankScreenState extends State<RankScreen> {
 
   Future<void> _load({bool force = false}) {
     return _gate.run(() async {
+      if (!mounted) return;
+      if (_data == null) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+      }
       try {
         final res = await ApiClient.instance.getJson('/api/rank');
         if (!mounted) return;
@@ -53,6 +61,8 @@ class _RankScreenState extends State<RankScreen> {
       } catch (e) {
         if (!mounted) return;
         setState(() => _error = formatError(e));
+      } finally {
+        if (mounted && _loading) setState(() => _loading = false);
       }
     }, force: force);
   }
@@ -82,12 +92,19 @@ class _RankScreenState extends State<RankScreen> {
         ),
         body: Column(
           children: [
-            if (_error != null && _data == null)
+            if (_loading && _data == null)
+              const LinearProgressIndicator(minHeight: 2)
+            else if (_error != null && _data == null)
               ErrorRetry(message: _error!, onRetry: () => _load(force: true))
             else if (_error != null)
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
+              ),
+            if (byComposite.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: _MyRankBanner(items: byComposite),
               ),
             if (star != null)
               Padding(
@@ -137,10 +154,16 @@ class _RankScreenState extends State<RankScreen> {
   }
 
   Widget _list(List<Map<String, dynamic>> items, {required _RankMode mode}) {
+    if (_loading && _data == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
     if (items.isEmpty) {
       return RefreshIndicator(
         onRefresh: () => _load(force: true),
-        child: ListView(children: const [SizedBox(height: 80), Center(child: Text('暂无成员'))]),
+        child: ListView(children: [
+          const SizedBox(height: 80),
+          Center(child: Text(_error != null ? '排行加载失败，下拉重试' : '暂无成员')),
+        ]),
       );
     }
     return RefreshIndicator(
@@ -231,3 +254,38 @@ class _RankScreenState extends State<RankScreen> {
 }
 
 enum _RankMode { composite, points, streak }
+
+class _MyRankBanner extends StatelessWidget {
+  const _MyRankBanner({required this.items});
+  final List<Map<String, dynamic>> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final me = ApiClient.instance.userId;
+    if (me == null) return const SizedBox.shrink();
+    var rank = -1;
+    Map<String, dynamic>? mine;
+    for (var i = 0; i < items.length; i++) {
+      final uid = items[i]['userId'];
+      if (uid is num && uid.toInt() == me) {
+        rank = i + 1;
+        mine = items[i];
+        break;
+      }
+    }
+    if (rank < 0 || mine == null) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4E8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        '你目前第 $rank 名 · 综合 ${mine['compositeScore']} 分',
+        style: const TextStyle(fontWeight: FontWeight.w800),
+      ),
+    );
+  }
+}

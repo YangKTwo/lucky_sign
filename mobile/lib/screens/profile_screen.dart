@@ -272,6 +272,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onTap: _copyInvite,
               ),
               const SizedBox(height: 10),
+              const SettingsTile(
+                icon: Icons.notifications_outlined,
+                title: '本地打卡提醒',
+                subtitle: '每天 8:00 看签 · 20:00 催打卡（本机通知，不走系统推送）',
+              ),
+              const SizedBox(height: 10),
               SettingsTile(
                 icon: Icons.lock_reset_outlined,
                 title: '修改密码',
