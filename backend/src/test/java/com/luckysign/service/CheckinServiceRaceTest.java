@@ -8,6 +8,7 @@ import com.luckysign.entity.CheckinRecord;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.entity.User;
 import com.luckysign.repository.CheckinRecordRepository;
+import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.DailyDrawRepository;
 import com.luckysign.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,12 +19,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.argThat;
 
 @ExtendWith(MockitoExtension.class)
 class CheckinServiceRaceTest {
@@ -34,6 +40,8 @@ class CheckinServiceRaceTest {
     private DailyDrawRepository dailyDrawRepository;
     @Mock
     private CheckinRecordRepository checkinRecordRepository;
+    @Mock
+    private CircleMemberRepository circleMemberRepository;
     @Mock
     private PointsService pointsService;
     @Mock
@@ -53,8 +61,11 @@ class CheckinServiceRaceTest {
     void setUp() {
         checkinService = new CheckinService(
                 userRepository, dailyDrawRepository, checkinRecordRepository,
-                pointsService, drawService, titleService, chatService,
+                circleMemberRepository, pointsService, drawService, titleService, chatService,
                 fileStorageService, ratingService);
+        lenient().when(circleMemberRepository.findByCircleId(any())).thenReturn(List.of());
+        lenient().when(dailyDrawRepository.findByUserIdAndDrawDateGreaterThanEqualOrderByDrawDateDesc(any(), any()))
+                .thenReturn(List.of());
     }
 
     @Test
@@ -133,8 +144,26 @@ class CheckinServiceRaceTest {
         when(checkinRecordRepository.save(any(CheckinRecord.class)))
                 .thenThrow(new DataIntegrityViolationException("Duplicate entry for key 'uk_user_checkin_date'"));
 
-        assertThrows(DataIntegrityViolationException.class,
+        BizException ex = assertThrows(BizException.class,
                 () -> checkinService.complete(circleId, 1L, "完成任务", null));
+        assertEquals("今日已打卡", ex.getMessage());
+    }
+
+    @Test
+    void completeRejectsEmptyProof() {
+        LocalDate today = LocalDate.now();
+        Long circleId = 5L;
+        User user = createTestUser(1L);
+        DailyDraw draw = createTestDraw(1L, 1L, today, DrawStatus.VIEWED);
+
+        when(drawService.today()).thenReturn(today);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(drawService.ensureDraw(circleId, 1L, today)).thenReturn(draw);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> checkinService.complete(circleId, 1L, "  ", null));
+        assertEquals("请输入打卡内容或上传图片", ex.getMessage());
+        verify(checkinRecordRepository, never()).save(any());
     }
 
     private User createTestUser(Long id) {

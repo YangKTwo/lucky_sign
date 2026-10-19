@@ -43,15 +43,15 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException e) {
-        String message = e.getMessage();
-        if (message != null && (message.contains("Duplicate") || message.contains("UNIQUE"))) {
-            log.warn("Duplicate entry conflict: {}", message);
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(new ApiResponse<>(false, "数据已存在，请勿重复操作", null));
+        String friendly = IntegrityMessages.of(e);
+        if ("数据处理错误".equals(friendly)) {
+            log.error("Data integrity error", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse<>(false, friendly, null));
         }
-        log.error("Data integrity error", e);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new ApiResponse<>(false, "数据处理错误", null));
+        log.warn("Duplicate entry conflict: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiResponse<>(false, friendly, null));
     }
 
     @ExceptionHandler(Exception.class)

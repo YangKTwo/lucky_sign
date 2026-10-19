@@ -4,6 +4,7 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
 import '../utils/refresh_gate.dart';
+import '../utils/today_copy.dart';
 import '../widgets/ui_bits.dart';
 
 class RankScreen extends StatefulWidget {
@@ -18,6 +19,7 @@ class RankScreen extends StatefulWidget {
 class _RankScreenState extends State<RankScreen> {
   Map<String, dynamic>? _data;
   String? _error;
+  bool _loading = true;
   final _gate = RefreshGate(minInterval: const Duration(seconds: 30));
 
   @override
@@ -44,15 +46,20 @@ class _RankScreenState extends State<RankScreen> {
         final data = res['data'] as Map<String, dynamic>;
         final fp = data.toString();
         if (!_gate.noteFingerprint(fp) && _data != null) {
+          if (mounted && _loading) setState(() => _loading = false);
           return;
         }
         setState(() {
           _data = data;
           _error = null;
+          _loading = false;
         });
       } catch (e) {
         if (!mounted) return;
-        setState(() => _error = formatError(e));
+        setState(() {
+          _error = formatError(e);
+          _loading = false;
+        });
       }
     }, force: force);
   }
@@ -82,6 +89,8 @@ class _RankScreenState extends State<RankScreen> {
         ),
         body: Column(
           children: [
+            if (_loading && _data == null)
+              const LinearProgressIndicator(minHeight: 2),
             if (_error != null && _data == null)
               ErrorRetry(message: _error!, onRetry: () => _load(force: true))
             else if (_error != null)
@@ -89,6 +98,7 @@ class _RankScreenState extends State<RankScreen> {
                 padding: const EdgeInsets.all(12),
                 child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
               ),
+            if (_data != null) _RankHero(items: byComposite),
             if (star != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -137,6 +147,21 @@ class _RankScreenState extends State<RankScreen> {
   }
 
   Widget _list(List<Map<String, dynamic>> items, {required _RankMode mode}) {
+    if (_data == null) {
+      if (_error != null) {
+        return const SizedBox.shrink();
+      }
+      return RefreshIndicator(
+        onRefresh: () => _load(force: true),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 80),
+            Center(child: CircularProgressIndicator()),
+          ],
+        ),
+      );
+    }
     if (items.isEmpty) {
       return RefreshIndicator(
         onRefresh: () => _load(force: true),
@@ -231,3 +256,54 @@ class _RankScreenState extends State<RankScreen> {
 }
 
 enum _RankMode { composite, points, streak }
+
+class _RankHero extends StatelessWidget {
+  const _RankHero({required this.items});
+  final List<Map<String, dynamic>> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final me = ApiClient.instance.userId;
+    final rank = compositeRank(items, me);
+    final completed = items.where((m) => m['todayStatus'] == 'COMPLETED').length;
+    final total = items.length;
+    final waiting = items
+        .where((m) {
+          if (m['todayStatus'] == 'COMPLETED') return false;
+          if (me != null && m['userId'] is num && (m['userId'] as num).toInt() == me) return false;
+          return true;
+        })
+        .map((m) => m['nickname']?.toString() ?? '')
+        .where((n) => n.isNotEmpty)
+        .toList();
+    final meCompleted = items.any((m) {
+      return me != null && m['userId'] is num && (m['userId'] as num).toInt() == me && m['todayStatus'] == 'COMPLETED';
+    });
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE7DDD2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (rank != null)
+              Text(rankPositionLine(rank), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            if (total > 0) ...[
+              if (rank != null) const SizedBox(height: 4),
+              Text(
+                '${circleProgressHeadline(completed, total)} · ${circleProgressDetail(meCompleted: meCompleted, waiting: waiting)}',
+                style: const TextStyle(fontSize: 13, color: Color(0xFF8A8078), height: 1.35),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
