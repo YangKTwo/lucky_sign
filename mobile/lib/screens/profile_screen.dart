@@ -278,6 +278,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 subtitle: '需要验证当前密码',
                 onTap: _changePassword,
               ),
+              const SizedBox(height: 10),
+              SettingsTile(
+                icon: Icons.notifications_outlined,
+                title: '本地打卡提醒',
+                subtitle: '每天 8:00 与 20:00，登录后预约；不是系统推送',
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('已在登录时预约本地提醒，请允许通知权限')),
+                  );
+                },
+              ),
               if (p['role']?.toString() == 'ADMIN') ...[
                 const SizedBox(height: 10),
                 SettingsTile(

@@ -1,11 +1,14 @@
 package com.luckysign.service;
 
 import com.luckysign.common.BizException;
+import com.luckysign.config.IsolatedTx;
 import com.luckysign.domain.DrawStatus;
 import com.luckysign.domain.FortuneLevel;
 import com.luckysign.domain.UserTag;
 import com.luckysign.entity.*;
 import com.luckysign.repository.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +21,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class DrawService {
+    private static final Logger log = LoggerFactory.getLogger(DrawService.class);
+
     private final UserRepository userRepository;
     private final DailyDrawRepository dailyDrawRepository;
     private final TaskItemRepository taskItemRepository;
@@ -25,6 +30,7 @@ public class DrawService {
     private final CircleRepository circleRepository;
     private final CircleMemberRepository circleMemberRepository;
     private final CircleDailyStarRepository circleDailyStarRepository;
+    private final IsolatedTx isolatedTx;
     private final ZoneId zoneId = ZoneId.of("Asia/Shanghai");
 
     public DrawService(UserRepository userRepository,
@@ -33,7 +39,8 @@ public class DrawService {
                        FortuneCopyRepository fortuneCopyRepository,
                        CircleRepository circleRepository,
                        CircleMemberRepository circleMemberRepository,
-                       CircleDailyStarRepository circleDailyStarRepository) {
+                       CircleDailyStarRepository circleDailyStarRepository,
+                       IsolatedTx isolatedTx) {
         this.userRepository = userRepository;
         this.dailyDrawRepository = dailyDrawRepository;
         this.taskItemRepository = taskItemRepository;
@@ -41,16 +48,20 @@ public class DrawService {
         this.circleRepository = circleRepository;
         this.circleMemberRepository = circleMemberRepository;
         this.circleDailyStarRepository = circleDailyStarRepository;
+        this.isolatedTx = isolatedTx;
     }
 
     public LocalDate today() {
         return LocalDate.now(zoneId);
     }
 
-    @Transactional
     public void generateForAllActiveUsers(Long circleId) {
         LocalDate date = today();
-        ensureLuckyStar(circleId, date);
+        try {
+            isolatedTx.run(() -> ensureLuckyStar(circleId, date));
+        } catch (Exception e) {
+            log.error("Failed to pick lucky star circleId={}", circleId, e);
+        }
         Set<Long> memberUserIds = circleMemberRepository.findByCircleId(circleId).stream()
                 .map(CircleMember::getUserId)
                 .collect(Collectors.toSet());
@@ -58,7 +69,11 @@ public class DrawService {
                 .filter(u -> memberUserIds.contains(u.getId()))
                 .toList();
         for (User user : users) {
-            ensureDraw(circleId, user.getId(), date);
+            try {
+                isolatedTx.run(() -> ensureDraw(circleId, user.getId(), date));
+            } catch (Exception e) {
+                log.error("Failed to generate draw circleId={} userId={}", circleId, user.getId(), e);
+            }
         }
     }
 
