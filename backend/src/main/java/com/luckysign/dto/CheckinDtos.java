@@ -26,7 +26,9 @@ public class CheckinDtos {
             Integer nextTitleAt,
             String tag,
             String imageUrl,
-            String textContent
+            String textContent,
+            String completedAt,
+            Integer streakBonusPoints
     ) {
     }
 

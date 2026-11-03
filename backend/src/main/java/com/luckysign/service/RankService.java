@@ -47,7 +47,7 @@ public class RankService {
         this.ratingService = ratingService;
     }
 
-    public RankDtos.RankingResponse ranking(Long circleId) {
+    public RankDtos.RankingResponse ranking(Long circleId, Long viewerId) {
         LocalDate today = drawService.today();
         List<CircleMember> members = circleMemberRepository.findByCircleId(circleId);
         Map<Long, User> users = userRepository.findAllById(members.stream().map(CircleMember::getUserId).toList())
@@ -99,6 +99,19 @@ public class RankService {
                 })
                 .orElse(null);
 
-        return new RankDtos.RankingResponse(byComposite, byPoints, byStreak, luckyStarInfo);
+        int todayCompleted = (int) list.stream()
+                .filter(m -> "COMPLETED".equals(m.todayStatus()))
+                .count();
+        Integer myRank = null;
+        if (viewerId != null) {
+            for (int i = 0; i < byComposite.size(); i++) {
+                if (viewerId.equals(byComposite.get(i).userId())) {
+                    myRank = i + 1;
+                    break;
+                }
+            }
+        }
+        return new RankDtos.RankingResponse(
+                byComposite, byPoints, byStreak, luckyStarInfo, list.size(), todayCompleted, myRank);
     }
 }

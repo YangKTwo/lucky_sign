@@ -41,17 +41,23 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse<>(false, "操作冲突，请刷新后重试", null));
     }
 
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnauthorized(UnauthorizedException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(new ApiResponse<>(false, e.getMessage(), null));
+    }
+
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException e) {
-        String message = e.getMessage();
-        if (message != null && (message.contains("Duplicate") || message.contains("UNIQUE"))) {
-            log.warn("Duplicate entry conflict: {}", message);
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(new ApiResponse<>(false, "数据已存在，请勿重复操作", null));
+        String message = IntegrityMessages.of(e);
+        if (IntegrityMessages.DATA_ERROR.equals(message)) {
+            log.error("Data integrity error", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse<>(false, message, null));
         }
-        log.error("Data integrity error", e);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new ApiResponse<>(false, "数据处理错误", null));
+        log.warn("Duplicate entry conflict: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiResponse<>(false, message, null));
     }
 
     @ExceptionHandler(Exception.class)

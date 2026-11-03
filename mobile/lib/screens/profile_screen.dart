@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../main.dart';
 import '../services/api_client.dart';
+import '../services/reminder_service.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
 import '../utils/refresh_gate.dart';
@@ -162,6 +163,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<void> _explainReminders() async {
+    await ReminderService.instance.scheduleDaily();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('本地提醒'),
+        content: const Text('每天 8:00 提醒抽签，20:00 提醒还没打卡的人。这是本机通知，不是系统推送；若收不到，请到系统设置里允许通知。'),
+        actions: [
+          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('知道了')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _copyInvite() async {
     final code = _circle?['inviteCode']?.toString() ?? '';
     if (code.isEmpty) return;
@@ -249,7 +265,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   StatTile(label: '总积分', value: '${p['points']}'),
                   const SizedBox(width: 10),
-                  StatTile(label: '连续签到', value: '${p['streakDays']}'),
+                  StatTile(label: '连续打卡', value: '${p['streakDays']}'),
                   const SizedBox(width: 10),
                   StatTile(label: '累计完成', value: '${p['totalCompletedDays']}'),
                 ],
@@ -270,6 +286,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ? '邀请码加载失败，下拉刷新'
                     : '邀请码 ${_circle!['inviteCode']} · ${_circle!['memberCount']}/${_circle!['maxMembers']} 人 · 点此复制',
                 onTap: _copyInvite,
+              ),
+              const SizedBox(height: 10),
+              SettingsTile(
+                icon: Icons.notifications_outlined,
+                title: '本地提醒',
+                subtitle: '每天 8:00 抽签、20:00 催打卡。需在系统设置允许通知，不会发系统推送。',
+                onTap: _explainReminders,
               ),
               const SizedBox(height: 10),
               SettingsTile(
@@ -299,7 +322,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 28),
               const Row(
                 children: [
-                  Text('历史签到', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  Text('历史打卡', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                   Spacer(),
                 ],
               ),
@@ -817,7 +840,7 @@ class _StreakHeatmap extends StatelessWidget {
     if (days.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(child: Text('暂无签到日历', style: TextStyle(color: Color(0xFF8A8078)))),
+        child: Center(child: Text('暂无打卡日历', style: TextStyle(color: Color(0xFF8A8078)))),
       );
     }
     const cell = 12.0;

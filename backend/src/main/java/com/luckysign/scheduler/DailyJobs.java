@@ -33,25 +33,41 @@ public class DailyJobs {
     public void generateDraws() {
         log.info("Generating daily draws for all circles...");
         for (Circle circle : circleRepository.findAll()) {
-            drawService.generateForAllActiveUsers(circle.getId());
+            try {
+                drawService.generateForAllActiveUsers(circle.getId());
+            } catch (Exception e) {
+                log.error("Generating draws failed for circleId={}", circle.getId(), e);
+            }
         }
     }
 
     @Scheduled(cron = "0 10 0 * * *", zone = "Asia/Shanghai")
     public void settle() {
         log.info("Settling yesterday misses...");
-        settlementService.settleYesterday();
+        try {
+            settlementService.settleYesterday();
+        } catch (Exception e) {
+            log.error("Settlement job failed", e);
+        }
     }
 
     @Scheduled(cron = "0 0 8 * * *", zone = "Asia/Shanghai")
     public void morningMail() {
         log.info("Sending morning mails...");
-        mailNotifyService.sendDailyReminders();
+        try {
+            mailNotifyService.sendDailyReminders();
+        } catch (Exception e) {
+            log.error("Morning mail job failed", e);
+        }
     }
 
     @Scheduled(cron = "0 0 20 * * *", zone = "Asia/Shanghai")
     public void eveningIncompleteMail() {
         log.info("Sending evening incomplete reminders...");
-        mailNotifyService.sendIncompleteReminders(drawService.today());
+        try {
+            mailNotifyService.sendIncompleteReminders(drawService.today());
+        } catch (Exception e) {
+            log.error("Evening reminder job failed", e);
+        }
     }
 }

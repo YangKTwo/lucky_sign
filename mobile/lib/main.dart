@@ -33,8 +33,8 @@ Future<bool> _ensureValidSession() async {
   } on SessionExpiredException {
     return false;
   } catch (_) {
-    await ApiClient.instance.saveToken(null);
-    return false;
+    // 网络抖动时保留本地会话，进入首页后再由各页重试。
+    return ApiClient.instance.isLoggedIn;
   }
 }
 

@@ -4,6 +4,7 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
 import '../utils/refresh_gate.dart';
+import '../utils/today_copy.dart';
 import '../widgets/ui_bits.dart';
 
 class RankScreen extends StatefulWidget {
@@ -18,6 +19,7 @@ class RankScreen extends StatefulWidget {
 class _RankScreenState extends State<RankScreen> {
   Map<String, dynamic>? _data;
   String? _error;
+  bool _loading = false;
   final _gate = RefreshGate(minInterval: const Duration(seconds: 30));
 
   @override
@@ -38,6 +40,13 @@ class _RankScreenState extends State<RankScreen> {
 
   Future<void> _load({bool force = false}) {
     return _gate.run(() async {
+      final showSpinner = _data == null;
+      if (showSpinner && mounted) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+      }
       try {
         final res = await ApiClient.instance.getJson('/api/rank');
         if (!mounted) return;
@@ -53,9 +62,13 @@ class _RankScreenState extends State<RankScreen> {
       } catch (e) {
         if (!mounted) return;
         setState(() => _error = formatError(e));
+      } finally {
+        if (mounted && _loading) setState(() => _loading = false);
       }
     }, force: force);
   }
+
+  int _asInt(dynamic v) => v is num ? v.toInt() : 0;
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +76,11 @@ class _RankScreenState extends State<RankScreen> {
     final byPoints = (_data?['byPoints'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     final byStreak = (_data?['byStreak'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     final star = _data?['luckyStar'] as Map<String, dynamic>?;
+    final myRank = _asInt(_data?['myRankComposite']);
+    final completed = _asInt(_data?['todayCompletedCount']);
+    final members = _asInt(_data?['memberCount']);
+    final position = RankCopy.myPosition(myRank == 0 ? null : myRank);
+    final progress = RankCopy.todayProgress(completed, members);
 
     return DefaultTabController(
       length: 3,
@@ -82,6 +100,7 @@ class _RankScreenState extends State<RankScreen> {
         ),
         body: Column(
           children: [
+            if (_loading && _data == null) const LinearProgressIndicator(minHeight: 2),
             if (_error != null && _data == null)
               ErrorRetry(message: _error!, onRetry: () => _load(force: true))
             else if (_error != null)
@@ -114,6 +133,23 @@ class _RankScreenState extends State<RankScreen> {
                   ),
                 ),
               ),
+            if (position.isNotEmpty || progress.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF4E8),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.accent.withValues(alpha: 0.35)),
+                  ),
+                  child: Text(
+                    [position, progress].where((s) => s.isNotEmpty).join(' · '),
+                    style: const TextStyle(fontWeight: FontWeight.w800, height: 1.35),
+                  ),
+                ),
+              ),
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Text(
@@ -137,6 +173,12 @@ class _RankScreenState extends State<RankScreen> {
   }
 
   Widget _list(List<Map<String, dynamic>> items, {required _RankMode mode}) {
+    if (_loading && _data == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _data == null) {
+      return const SizedBox.shrink();
+    }
     if (items.isEmpty) {
       return RefreshIndicator(
         onRefresh: () => _load(force: true),

@@ -12,7 +12,7 @@ void main() {
   });
 
   testWidgets('app loads', (tester) async {
-    await tester.pumpWidget(const LuckySignApp());
+    await tester.pumpWidget(const LuckySignApp(loggedIn: false));
     await tester.pump();
     expect(find.textContaining('幸运签'), findsWidgets);
   });

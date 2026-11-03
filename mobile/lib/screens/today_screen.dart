@@ -9,12 +9,14 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
 import '../utils/refresh_gate.dart';
+import '../utils/today_copy.dart';
 import '../widgets/ui_bits.dart';
 
 class TodayScreen extends StatefulWidget {
-  const TodayScreen({super.key, this.isActive = true});
+  const TodayScreen({super.key, this.isActive = true, this.onOpenCommunity});
 
   final bool isActive;
+  final VoidCallback? onOpenCommunity;
 
   @override
   State<TodayScreen> createState() => _TodayScreenState();
@@ -22,8 +24,11 @@ class TodayScreen extends StatefulWidget {
 
 class _TodayScreenState extends State<TodayScreen> {
   Map<String, dynamic>? _data;
+  Map<String, dynamic>? _rank;
+  List<Map<String, dynamic>> _calendar = [];
   String? _error;
   bool _loading = true;
+  bool _checkingIn = false;
   Timer? _clock;
   DateTime _now = DateTime.now();
   final _gate = RefreshGate(minInterval: const Duration(seconds: 15));
@@ -36,7 +41,12 @@ class _TodayScreenState extends State<TodayScreen> {
     }
     _clock = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
-      setState(() => _now = DateTime.now());
+      final now = DateTime.now();
+      final crossedDay = !TodayCopy.sameDay(_now, now) || TodayCopy.isStaleDraw(_data?['date']?.toString(), now);
+      setState(() => _now = now);
+      if (crossedDay) {
+        _load(force: true);
+      }
     });
   }
 
@@ -68,12 +78,24 @@ class _TodayScreenState extends State<TodayScreen> {
         final res = await ApiClient.instance.getJson('/api/checkin/today');
         if (!mounted) return;
         final data = res['data'] as Map<String, dynamic>;
-        final fp = jsonEncode(data);
+        List<Map<String, dynamic>> calendar = _calendar;
+        Map<String, dynamic>? rank = _rank;
+        try {
+          final calRes = await ApiClient.instance.getJson('/api/checkin/calendar?days=14');
+          calendar = (calRes['data']?['days'] as List?)?.cast<Map<String, dynamic>>() ?? calendar;
+        } catch (_) {}
+        try {
+          final rankRes = await ApiClient.instance.getJson('/api/rank');
+          rank = rankRes['data'] as Map<String, dynamic>? ?? rank;
+        } catch (_) {}
+        final fp = jsonEncode({'today': data, 'calendar': calendar, 'rank': rank});
         if (!_gate.noteFingerprint(fp) && _data != null) {
           return;
         }
         setState(() {
           _data = data;
+          _calendar = calendar;
+          _rank = rank;
           _error = null;
         });
       } catch (e) {
@@ -86,10 +108,14 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   Future<void> _checkin() async {
+    if (_checkingIn) return;
+    _checkingIn = true;
     final textCtrl = TextEditingController();
     XFile? image;
     Uint8List? previewBytes;
-    final ok = await showModalBottomSheet<bool>(
+    String? localError;
+    var submitting = false;
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
@@ -97,6 +123,34 @@ class _TodayScreenState extends State<TodayScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setLocal) {
+            Future<void> submit() async {
+              final text = textCtrl.text.trim();
+              if (text.isEmpty && image == null) {
+                setLocal(() => localError = '请写一句完成感受，或拍一张凭证');
+                return;
+              }
+              if (text.length > 500) {
+                setLocal(() => localError = '打卡内容不能超过 500 字');
+                return;
+              }
+              setLocal(() {
+                submitting = true;
+                localError = null;
+              });
+              try {
+                final res = await ApiClient.instance.completeCheckin(text: textCtrl.text, image: image);
+                if (ctx.mounted) {
+                  Navigator.pop(ctx, res['data'] as Map<String, dynamic>);
+                }
+              } catch (e) {
+                if (!ctx.mounted) return;
+                setLocal(() {
+                  submitting = false;
+                  localError = formatError(e);
+                });
+              }
+            }
+
             return Padding(
               padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
               child: Column(
@@ -113,50 +167,58 @@ class _TodayScreenState extends State<TodayScreen> {
                   const SizedBox(height: 16),
                   const Text('完成打卡', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 6),
-                  const Text('凭证会发到社区，大家都能看见', style: TextStyle(color: Color(0xFF8A8078))),
+                  const Text('写一句感受或拍一张现场照片，凭证会发到社区', style: TextStyle(color: Color(0xFF8A8078))),
                   const SizedBox(height: 16),
                   TextField(
                     controller: textCtrl,
                     maxLines: 3,
-                    decoration: const InputDecoration(hintText: '可选：写点完成感受'),
+                    maxLength: 500,
+                    enabled: !submitting,
+                    decoration: const InputDecoration(hintText: '写点完成感受，或只拍照也可以'),
                   ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
                       OutlinedButton.icon(
-                        onPressed: () async {
-                          final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
-                          if (picked == null) return;
-                          final bytes = await picked.readAsBytes();
-                          setLocal(() {
-                            image = picked;
-                            previewBytes = bytes;
-                          });
-                        },
+                        onPressed: submitting
+                            ? null
+                            : () async {
+                                final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
+                                if (picked == null) return;
+                                final bytes = await picked.readAsBytes();
+                                setLocal(() {
+                                  image = picked;
+                                  previewBytes = bytes;
+                                });
+                              },
                         icon: const Icon(Icons.photo_outlined),
                         label: Text(image == null ? '相册' : '已选图'),
                       ),
                       const SizedBox(width: 8),
                       OutlinedButton.icon(
-                        onPressed: () async {
-                          final picked = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
-                          if (picked == null) return;
-                          final bytes = await picked.readAsBytes();
-                          setLocal(() {
-                            image = picked;
-                            previewBytes = bytes;
-                          });
-                        },
+                        onPressed: submitting
+                            ? null
+                            : () async {
+                                final picked = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
+                                if (picked == null) return;
+                                final bytes = await picked.readAsBytes();
+                                setLocal(() {
+                                  image = picked;
+                                  previewBytes = bytes;
+                                });
+                              },
                         icon: const Icon(Icons.photo_camera_outlined),
                         label: const Text('拍照'),
                       ),
                       if (image != null) ...[
                         const SizedBox(width: 8),
                         TextButton(
-                          onPressed: () => setLocal(() {
-                            image = null;
-                            previewBytes = null;
-                          }),
+                          onPressed: submitting
+                              ? null
+                              : () => setLocal(() {
+                                    image = null;
+                                    previewBytes = null;
+                                  }),
                           child: const Text('清除'),
                         ),
                       ],
@@ -166,18 +228,22 @@ class _TodayScreenState extends State<TodayScreen> {
                     const SizedBox(height: 12),
                     LocalImagePreview(bytes: previewBytes!),
                   ],
+                  if (localError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(localError!, style: const TextStyle(color: Color(0xFFC0392B), height: 1.35)),
+                  ],
                   const SizedBox(height: 18),
                   SizedBox(
                     width: double.infinity,
                     height: 48,
                     child: FilledButton(
                       style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('提交到社区'),
+                      onPressed: submitting ? null : submit,
+                      child: Text(submitting ? '提交中…' : '提交到社区'),
                     ),
                   ),
                   TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
+                    onPressed: submitting ? null : () => Navigator.pop(ctx),
                     child: const Center(child: Text('取消')),
                   ),
                 ],
@@ -187,57 +253,42 @@ class _TodayScreenState extends State<TodayScreen> {
         );
       },
     );
-    if (ok != true) return;
-    try {
-      final res = await ApiClient.instance.completeCheckin(text: textCtrl.text, image: image);
-      if (!mounted) return;
-      final data = res['data'] as Map<String, dynamic>;
-      setState(() => _data = data);
-      _gate.markFresh(jsonEncode(data));
-      await _celebrateCheckin(data);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(formatError(e))),
-      );
+    textCtrl.dispose();
+    if (!mounted) {
+      return;
     }
+    setState(() => _checkingIn = false);
+    if (result == null) return;
+    setState(() => _data = result);
+    _gate.markFresh(jsonEncode({'today': result, 'calendar': _calendar, 'rank': _rank}));
+    await _celebrateCheckin(result);
+    await _load(force: true);
   }
 
   Future<void> _celebrateCheckin(Map<String, dynamic> data) async {
     final streak = (data['streakDays'] is num) ? (data['streakDays'] as num).toInt() : 0;
     final next = data['nextTitle']?.toString();
     final daysTo = (data['daysToNextTitle'] is num) ? (data['daysToNextTitle'] as num).toInt() : 0;
+    final bonus = (data['streakBonusPoints'] is num) ? (data['streakBonusPoints'] as num).toInt() : 0;
     if (!mounted) return;
-    await showDialog<void>(
+    final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('打卡成功'),
-        content: Text(
-          streak > 1
-              ? '连续 $streak 天！凭证已发到社区。${next != null && next.isNotEmpty ? '\n再坚持 $daysTo 天可解锁「$next」。' : ''}'
-              : '今日任务完成，凭证已发到社区。',
-        ),
+        content: Text(TodayCopy.celebrate(streak: streak, nextTitle: next, daysTo: daysTo, bonus: bonus) ?? '今日任务完成'),
         actions: [
-          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('好')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'ok'), child: const Text('好')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'community'),
+            child: const Text('去社区看看'),
+          ),
         ],
       ),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('打卡成功，已发到社区')));
-  }
-
-  DateTime get _deadline {
-    final n = _now;
-    return DateTime(n.year, n.month, n.day).add(const Duration(days: 1));
-  }
-
-  String _countdownLabel() {
-    final left = _deadline.difference(_now);
-    if (left.isNegative) return '即将结算';
-    final h = left.inHours;
-    final m = left.inMinutes.remainder(60);
-    if (h > 0) return '距结算还剩 $h 小时 $m 分';
-    return '距结算还剩 $m 分钟';
+    if (action == 'community') {
+      widget.onOpenCommunity?.call();
+    }
   }
 
   double _titleProgress(Map<String, dynamic> d) {
@@ -247,6 +298,8 @@ class _TodayScreenState extends State<TodayScreen> {
     return (total / at).clamp(0.0, 1.0);
   }
 
+  int _asInt(dynamic v) => v is num ? v.toInt() : 0;
+
   @override
   Widget build(BuildContext context) {
     final d = _data;
@@ -254,6 +307,26 @@ class _TodayScreenState extends State<TodayScreen> {
     final color = AppColors.level(level);
     final completed = d?['status'] == 'COMPLETED';
     final dormant = d?['tag'] == 'DORMANT' || (_error?.contains('休眠') ?? false);
+    final members = (_rank?['byComposite'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final myId = ApiClient.instance.userId;
+    final pendingNames = members
+        .where((m) => m['todayStatus'] != 'COMPLETED' && !(myId != null && m['userId'] is num && (m['userId'] as num).toInt() == myId))
+        .map((m) => m['nickname']?.toString() ?? '')
+        .where((n) => n.isNotEmpty)
+        .toList();
+    final completedCount = _asInt(_rank?['todayCompletedCount']);
+    final memberCount = _asInt(_rank?['memberCount']);
+    final circleLine = memberCount > 0
+        ? TodayCopy.circleProgress(
+            completed: completedCount,
+            total: memberCount,
+            mineCompleted: completed,
+            pendingNames: pendingNames,
+          )
+        : '';
+    final week = TodayCopy.weekCells(_calendar, _now);
+    final doneCaption = TodayCopy.completedCaption(d?['completedAt']?.toString());
+    final bonus = _asInt(d?['streakBonusPoints']);
 
     return Scaffold(
       appBar: AppBar(
@@ -273,6 +346,11 @@ class _TodayScreenState extends State<TodayScreen> {
                 message: _error!,
                 hint: dormant ? '休眠账号请联系管理员解锁后才能抽签。' : null,
                 onRetry: () => _load(force: true),
+              ),
+            if (_error != null && d != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
               ),
             if (d != null) ...[
               Container(
@@ -319,6 +397,8 @@ class _TodayScreenState extends State<TodayScreen> {
                 ),
               ),
               const SizedBox(height: 16),
+              _WeekStrip(cells: week),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   StatTile(label: '积分', value: '${d['points']}'),
@@ -349,6 +429,19 @@ class _TodayScreenState extends State<TodayScreen> {
                   ),
                 ],
               ),
+              if (circleLine.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE7DDD2)),
+                  ),
+                  child: Text(circleLine, style: const TextStyle(fontWeight: FontWeight.w700, height: 1.35)),
+                ),
+              ],
               const SizedBox(height: 16),
               if (!completed && !dormant) ...[
                 Container(
@@ -370,9 +463,7 @@ class _TodayScreenState extends State<TodayScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          _now.hour >= 18 && ((d['streakDays'] as num?)?.toInt() ?? 0) > 0
-                              ? '连续即将断开 · ${_countdownLabel()}'
-                              : _countdownLabel(),
+                          TodayCopy.streakNudge(_now, _asInt(d['streakDays'])),
                           style: const TextStyle(fontWeight: FontWeight.w700, height: 1.35),
                         ),
                       ),
@@ -430,12 +521,23 @@ class _TodayScreenState extends State<TodayScreen> {
                       children: [
                         Icon(Icons.stars_rounded, color: color, size: 20),
                         const SizedBox(width: 6),
-                        Text(
-                          '完成可得 ${d['rewardPoints']} 分${d['luckyStar'] == true ? '（幸运星已翻倍）' : ''}',
-                          style: TextStyle(color: color, fontWeight: FontWeight.w700),
+                        Expanded(
+                          child: Text(
+                            '完成可得 ${d['rewardPoints']} 分${d['luckyStar'] == true ? '（幸运星已翻倍）' : ''}',
+                            style: TextStyle(color: color, fontWeight: FontWeight.w700),
+                          ),
                         ),
                       ],
                     ),
+                    if (completed && doneCaption != null) ...[
+                      const SizedBox(height: 10),
+                      Text(doneCaption, style: const TextStyle(color: Color(0xFF6B625A), fontWeight: FontWeight.w700)),
+                    ],
+                    if (completed && bonus > 0) ...[
+                      const SizedBox(height: 6),
+                      Text(TodayCopy.streakBonusLine(bonus, _asInt(d['streakDays'])) ?? '',
+                          style: const TextStyle(color: AppColors.moss, fontWeight: FontWeight.w700)),
+                    ],
                     if (completed && (d['textContent']?.toString().isNotEmpty ?? false)) ...[
                       const SizedBox(height: 12),
                       Text(d['textContent'].toString(), style: const TextStyle(color: Color(0xFF6B625A), height: 1.35)),
@@ -452,16 +554,16 @@ class _TodayScreenState extends State<TodayScreen> {
                 height: 52,
                 child: completed
                     ? FilledButton.icon(
-                        onPressed: null,
-                        icon: const Icon(Icons.check_circle),
-                        label: const Text('今日已完成 ✓'),
+                        onPressed: widget.onOpenCommunity,
+                        icon: const Icon(Icons.forum_outlined),
+                        label: const Text('今日已完成 · 去社区'),
                       )
                     : FilledButton(
                         style: FilledButton.styleFrom(
                           backgroundColor: AppColors.accent,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         ),
-                        onPressed: dormant ? null : _checkin,
+                        onPressed: dormant || _checkingIn ? null : _checkin,
                         child: Text(dormant ? '休眠中，无法打卡' : '打卡完成任务'),
                       ),
               ),
@@ -469,6 +571,58 @@ class _TodayScreenState extends State<TodayScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _WeekStrip extends StatelessWidget {
+  const _WeekStrip({required this.cells});
+  final List<WeekCell> cells;
+
+  Color _color(WeekCell cell) {
+    switch (cell.status) {
+      case 'COMPLETED':
+        return AppColors.moss;
+      case 'MISSED':
+        return const Color(0xFFC0392B);
+      case 'PENDING':
+        return AppColors.accent;
+      default:
+        return const Color(0xFFD9D0C7);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (final cell in cells) ...[
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: cell.isToday ? const Color(0xFFFFF4E8) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: cell.isToday ? AppColors.accent.withValues(alpha: 0.55) : const Color(0xFFE7DDD2),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Text(cell.label, style: const TextStyle(fontSize: 11, color: Color(0xFF8A8078))),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(color: _color(cell), shape: BoxShape.circle),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (cell != cells.last) const SizedBox(width: 6),
+        ],
+      ],
     );
   }
 }
