@@ -1,5 +1,6 @@
 package com.luckysign.security;
 
+import com.luckysign.common.UnauthorizedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -12,6 +13,6 @@ public final class AuthSupport {
         if (auth instanceof UserPrincipal principal) {
             return principal.getUserId();
         }
-        throw new IllegalStateException("未登录");
+        throw new UnauthorizedException();
     }
 }

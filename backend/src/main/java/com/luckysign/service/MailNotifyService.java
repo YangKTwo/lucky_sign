@@ -45,7 +45,11 @@ public class MailNotifyService {
     public void sendDailyReminders() {
         List<User> users = userRepository.findByTagNot(UserTag.DORMANT);
         for (User user : users) {
-            send(user.getEmail(), "今日幸运签已到", "今日幸运签已到，打开App查看！🍀");
+            try {
+                send(user.getEmail(), "今日幸运签已到", "今日幸运签已到，打开App查看！🍀");
+            } catch (Exception e) {
+                log.warn("Morning reminder failed userId={}: {}", user.getId(), e.getMessage());
+            }
         }
     }
 
@@ -60,8 +64,12 @@ public class MailNotifyService {
             if (user == null || user.getTag() == UserTag.DORMANT) {
                 continue;
             }
-            send(user.getEmail(), "今日任务还没打卡",
-                    "今晚 0 点结算，未完成会断连续并扣分。打开「今日幸运签」完成打卡吧！");
+            try {
+                send(user.getEmail(), "今日任务还没打卡",
+                        "今晚 0 点后结算，未完成会断连续并扣分。打开「今日幸运签」完成打卡吧！");
+            } catch (Exception e) {
+                log.warn("Evening reminder failed userId={}: {}", user.getId(), e.getMessage());
+            }
         }
     }
 

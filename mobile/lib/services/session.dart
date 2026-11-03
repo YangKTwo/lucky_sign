@@ -5,6 +5,7 @@ import '../app_keys.dart';
 import '../screens/login_screen.dart';
 import 'api_client.dart';
 import 'chat_inbox.dart';
+import 'reminder_service.dart';
 
 export 'api_client.dart' show SessionExpiredException;
 
@@ -22,6 +23,7 @@ void bindSessionHandlers() {
 }
 
 Future<void> _clearLocalSession() async {
+  await ReminderService.instance.cancelDaily();
   await ApiClient.instance.saveToken(null);
   await ChatInbox.instance.reset();
   final prefs = await SharedPreferences.getInstance();

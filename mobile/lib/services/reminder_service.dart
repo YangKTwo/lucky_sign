@@ -49,7 +49,7 @@ class ReminderService {
     try {
       await _plugin.cancelAll();
       await _daily(1, 8, 0, '今日幸运签已到', '打开看看今天的签文和任务吧');
-      await _daily(2, 20, 0, '今日任务还没打卡？', '0 点结算，未完成会断连续并扣分');
+      await _daily(2, 20, 0, '今日任务还没打卡？', '0 点后结算，未完成会断连续并扣分');
     } catch (e) {
       // 通知失败不应阻断登录 / 进入首页
       debugPrint('ReminderService.scheduleDaily failed: $e');
@@ -77,6 +77,15 @@ class ReminderService {
       uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
     );
+  }
+
+  Future<void> cancelDaily() async {
+    if (kIsWeb || !_ready) return;
+    try {
+      await _plugin.cancelAll();
+    } catch (e) {
+      debugPrint('ReminderService.cancelDaily failed: $e');
+    }
   }
 
   tz.TZDateTime _nextInstance(int hour, int minute) {

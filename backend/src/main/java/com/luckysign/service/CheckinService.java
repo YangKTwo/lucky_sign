@@ -16,12 +16,18 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
 @Service
 public class CheckinService {
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final DateTimeFormatter COMPLETED_AT = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+
     private final UserRepository userRepository;
     private final DailyDrawRepository dailyDrawRepository;
     private final CheckinRecordRepository checkinRecordRepository;
@@ -134,7 +140,12 @@ public class CheckinService {
         record = checkinRecordRepository.save(record);
 
         chatService.postCheckin(circleId, user, record, draw);
-        return toToday(user, draw, record.getImageUrl(), record.getTextContent());
+        return toToday(user, draw, record.getImageUrl(), record.getTextContent(), record.getCreatedAt());
+    }
+
+    public int streakDays(Long userId) {
+        User user = userRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
+        return user.getStreakDays() == null ? 0 : user.getStreakDays();
     }
 
     public CheckinDtos.HistoryResponse history(Long circleId, Long userId) {
@@ -197,17 +208,20 @@ public class CheckinService {
     private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw) {
         String imageUrl = null;
         String textContent = null;
+        Instant completedAt = null;
         if (draw.getStatus() == DrawStatus.COMPLETED) {
             var record = checkinRecordRepository.findByUserIdAndCheckinDate(user.getId(), draw.getDrawDate());
             if (record.isPresent()) {
                 imageUrl = record.get().getImageUrl();
                 textContent = record.get().getTextContent();
+                completedAt = record.get().getCreatedAt();
             }
         }
-        return toToday(user, draw, imageUrl, textContent);
+        return toToday(user, draw, imageUrl, textContent, completedAt);
     }
 
-    private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw, String imageUrl, String textContent) {
+    private CheckinDtos.TodayResponse toToday(User user, DailyDraw draw, String imageUrl, String textContent,
+                                              Instant completedAt) {
         return new CheckinDtos.TodayResponse(
                 draw.getDrawDate(),
                 draw.getLevel(),
@@ -227,7 +241,29 @@ public class CheckinService {
                 titleService.nextTitleAt(user.getTotalCompletedDays()),
                 user.getTag().name(),
                 imageUrl,
-                textContent
+                textContent,
+                formatCompletedAt(completedAt),
+                streakBonusOf(user.getStreakDays(), draw.getStatus())
         );
+    }
+
+    static int streakBonusOf(Integer streakDays, DrawStatus status) {
+        if (status != DrawStatus.COMPLETED || streakDays == null || streakDays <= 0) {
+            return 0;
+        }
+        if (streakDays % 30 == 0) {
+            return 50;
+        }
+        if (streakDays % 7 == 0) {
+            return 10;
+        }
+        return 0;
+    }
+
+    static String formatCompletedAt(Instant instant) {
+        if (instant == null) {
+            return null;
+        }
+        return COMPLETED_AT.format(instant.atZone(ZONE));
     }
 }
