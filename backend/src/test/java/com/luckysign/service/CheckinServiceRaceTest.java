@@ -8,6 +8,7 @@ import com.luckysign.entity.CheckinRecord;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.entity.User;
 import com.luckysign.repository.CheckinRecordRepository;
+import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.DailyDrawRepository;
 import com.luckysign.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -34,6 +36,8 @@ class CheckinServiceRaceTest {
     private DailyDrawRepository dailyDrawRepository;
     @Mock
     private CheckinRecordRepository checkinRecordRepository;
+    @Mock
+    private CircleMemberRepository circleMemberRepository;
     @Mock
     private PointsService pointsService;
     @Mock
@@ -53,7 +57,7 @@ class CheckinServiceRaceTest {
     void setUp() {
         checkinService = new CheckinService(
                 userRepository, dailyDrawRepository, checkinRecordRepository,
-                pointsService, drawService, titleService, chatService,
+                circleMemberRepository, pointsService, drawService, titleService, chatService,
                 fileStorageService, ratingService);
     }
 
@@ -103,6 +107,13 @@ class CheckinServiceRaceTest {
         when(drawService.ensureDraw(circleId, 1L, today)).thenReturn(draw);
         when(drawService.rewardPoints(draw)).thenReturn(10);
         when(titleService.resolve(anyInt())).thenReturn("签到达人");
+        when(titleService.nextTitle(anyInt())).thenReturn(null);
+        when(titleService.daysToNextTitle(anyInt())).thenReturn(0);
+        when(circleMemberRepository.findByCircleId(circleId)).thenReturn(List.of());
+        when(userRepository.findAllById(any())).thenReturn(List.of());
+        when(dailyDrawRepository.findByDrawDate(today)).thenReturn(List.of(draw));
+        when(dailyDrawRepository.findByUserIdAndDrawDateGreaterThanEqualOrderByDrawDateDesc(any(), any()))
+                .thenReturn(List.of());
         when(checkinRecordRepository.save(any(CheckinRecord.class))).thenAnswer(inv -> {
             CheckinRecord r = inv.getArgument(0);
             r.setId(100L);
@@ -133,8 +144,37 @@ class CheckinServiceRaceTest {
         when(checkinRecordRepository.save(any(CheckinRecord.class)))
                 .thenThrow(new DataIntegrityViolationException("Duplicate entry for key 'uk_user_checkin_date'"));
 
-        assertThrows(DataIntegrityViolationException.class,
+        BizException ex = assertThrows(BizException.class,
                 () -> checkinService.complete(circleId, 1L, "完成任务", null));
+        assertEquals("今日已打卡", ex.getMessage());
+    }
+
+    @Test
+    void completeRejectsEmptyProof() {
+        LocalDate today = LocalDate.now();
+        Long circleId = 5L;
+        User user = createTestUser(1L);
+        DailyDraw draw = createTestDraw(1L, 1L, today, DrawStatus.VIEWED);
+
+        when(drawService.today()).thenReturn(today);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(drawService.ensureDraw(circleId, 1L, today)).thenReturn(draw);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> checkinService.complete(circleId, 1L, "  ", null));
+        assertEquals("请输入打卡内容或上传图片", ex.getMessage());
+        verify(checkinRecordRepository, never()).save(any());
+    }
+
+    @Test
+    void streakDoesNotMarkDrawViewed() {
+        User user = createTestUser(1L);
+        user.setStreakDays(4);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        assertEquals(4, checkinService.streak(1L));
+        verify(drawService, never()).ensureDraw(any(), any(), any());
+        verify(dailyDrawRepository, never()).save(any());
     }
 
     private User createTestUser(Long id) {

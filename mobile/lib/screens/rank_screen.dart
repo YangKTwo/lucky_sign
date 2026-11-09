@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
 import '../utils/refresh_gate.dart';
+import '../utils/today_copy.dart';
 import '../widgets/ui_bits.dart';
 
 class RankScreen extends StatefulWidget {
@@ -18,6 +21,7 @@ class RankScreen extends StatefulWidget {
 class _RankScreenState extends State<RankScreen> {
   Map<String, dynamic>? _data;
   String? _error;
+  bool _loading = true;
   final _gate = RefreshGate(minInterval: const Duration(seconds: 30));
 
   @override
@@ -38,11 +42,18 @@ class _RankScreenState extends State<RankScreen> {
 
   Future<void> _load({bool force = false}) {
     return _gate.run(() async {
+      if (!mounted) return;
+      if (_data == null) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+      }
       try {
         final res = await ApiClient.instance.getJson('/api/rank');
         if (!mounted) return;
         final data = res['data'] as Map<String, dynamic>;
-        final fp = data.toString();
+        final fp = jsonEncode(data);
         if (!_gate.noteFingerprint(fp) && _data != null) {
           return;
         }
@@ -53,6 +64,8 @@ class _RankScreenState extends State<RankScreen> {
       } catch (e) {
         if (!mounted) return;
         setState(() => _error = formatError(e));
+      } finally {
+        if (mounted && _loading) setState(() => _loading = false);
       }
     }, force: force);
   }
@@ -82,13 +95,19 @@ class _RankScreenState extends State<RankScreen> {
         ),
         body: Column(
           children: [
-            if (_error != null && _data == null)
+            if (_loading && _data == null)
+              const Padding(
+                padding: EdgeInsets.only(top: 48),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_error != null && _data == null)
               ErrorRetry(message: _error!, onRetry: () => _load(force: true))
             else if (_error != null)
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(_error!, style: const TextStyle(color: Color(0xFFC0392B))),
               ),
+            if (_data != null) _myRankBanner(),
             if (star != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -114,22 +133,68 @@ class _RankScreenState extends State<RankScreen> {
                   ),
                 ),
               ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: Text(
-                '综合分 = 任务积分 + 全员评完后的互评均分×2',
-                style: TextStyle(fontSize: 12, color: Color(0xFF8A8078)),
+            if (_data != null)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
+                child: Text(
+                  '综合分 = 任务积分 + 全员评完后的互评均分×2',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8A8078)),
+                ),
               ),
-            ),
             Expanded(
-              child: TabBarView(
-                children: [
-                  _list(byComposite, mode: _RankMode.composite),
-                  _list(byPoints, mode: _RankMode.points),
-                  _list(byStreak, mode: _RankMode.streak),
-                ],
-              ),
+              child: _loading && _data == null
+                  ? const SizedBox.shrink()
+                  : TabBarView(
+                      children: [
+                        _list(byComposite, mode: _RankMode.composite),
+                        _list(byPoints, mode: _RankMode.points),
+                        _list(byStreak, mode: _RankMode.streak),
+                      ],
+                    ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _myRankBanner() {
+    final members = (_data?['memberCount'] as num?)?.toInt() ?? 0;
+    final done = (_data?['todayCompletedCount'] as num?)?.toInt() ?? 0;
+    var rank = (_data?['myRankComposite'] as num?)?.toInt();
+    if (rank == null) {
+      final me = ApiClient.instance.userId;
+      final list = (_data?['byComposite'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      for (var i = 0; i < list.length; i++) {
+        final uid = list[i]['userId'];
+        if (me != null && uid is num && uid.toInt() == me) {
+          rank = i + 1;
+          break;
+        }
+      }
+    }
+    final rankCopy = TodayCopy.myRank(rank, members > 0 ? members : ((_data?['byComposite'] as List?)?.length ?? 0));
+    final progress = members > 0 ? '今日打卡 $done/$members' : '';
+    if (rankCopy.isEmpty && progress.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF4E8),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.accent.withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (rankCopy.isNotEmpty)
+              Text(rankCopy, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            if (progress.isNotEmpty) ...[
+              if (rankCopy.isNotEmpty) const SizedBox(height: 4),
+              Text(progress, style: const TextStyle(fontSize: 13, color: Color(0xFF8A8078))),
+            ],
           ],
         ),
       ),
@@ -138,9 +203,17 @@ class _RankScreenState extends State<RankScreen> {
 
   Widget _list(List<Map<String, dynamic>> items, {required _RankMode mode}) {
     if (items.isEmpty) {
+      if (_loading && _data == null) {
+        return const SizedBox.shrink();
+      }
       return RefreshIndicator(
         onRefresh: () => _load(force: true),
-        child: ListView(children: const [SizedBox(height: 80), Center(child: Text('暂无成员'))]),
+        child: ListView(
+          children: [
+            const SizedBox(height: 80),
+            Center(child: Text(_error != null ? '排行暂时加载不出来' : '暂无成员')),
+          ],
+        ),
       );
     }
     return RefreshIndicator(

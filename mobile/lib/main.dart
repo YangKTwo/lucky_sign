@@ -24,7 +24,8 @@ Future<void> main() async {
   runApp(LuckySignApp(loggedIn: loggedIn));
 }
 
-/// 本地有 token 时向服务端校验；失效则清会话，避免直接进首页后处处报错。
+/// 本地有 token 时向服务端校验；仅在确认过期时清会话。
+/// 冷启动网络抖动不清 token，避免把人踢回登录页。
 Future<bool> _ensureValidSession() async {
   if (!ApiClient.instance.isLoggedIn) return false;
   try {
@@ -33,8 +34,7 @@ Future<bool> _ensureValidSession() async {
   } on SessionExpiredException {
     return false;
   } catch (_) {
-    await ApiClient.instance.saveToken(null);
-    return false;
+    return ApiClient.instance.isLoggedIn;
   }
 }
 

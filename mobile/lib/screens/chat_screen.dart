@@ -42,6 +42,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _showMentionPicker = false;
   String _mentionQuery = '';
   int _atStart = -1;
+  bool _sending = false;
 
   /// 是否贴近列表底部（最新消息）。
   bool _nearBottom = true;
@@ -598,17 +599,27 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _send() async {
     final text = _input.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _sending) return;
     _input.clear();
-    setState(() => _showMentionPicker = false);
+    setState(() {
+      _showMentionPicker = false;
+      _sending = true;
+    });
     try {
       final res = await ApiClient.instance.postJson('/api/chat/messages', {'content': text});
       if (!mounted) return;
       final msg = res['data'] as Map<String, dynamic>;
-      setState(() => _upsertMessage(msg));
+      setState(() {
+        _upsertMessage(msg);
+        _sending = false;
+      });
       await _scrollToLatest(animate: true);
     } catch (e) {
       if (!mounted) return;
+      _input
+        ..text = text
+        ..selection = TextSelection.collapsed(offset: text.length);
+      setState(() => _sending = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(formatError(e))),
       );
@@ -1138,10 +1149,22 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  IconButton.filled(
-                    style: IconButton.styleFrom(backgroundColor: AppColors.accent),
-                    onPressed: _send,
-                    icon: const Icon(Icons.send_rounded, size: 20),
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _input,
+                    builder: (_, value, __) {
+                      final canSend = !_sending && value.text.trim().isNotEmpty;
+                      return IconButton.filled(
+                        style: IconButton.styleFrom(backgroundColor: AppColors.accent),
+                        onPressed: canSend ? _send : null,
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.send_rounded, size: 20),
+                      );
+                    },
                   ),
                 ],
               ),

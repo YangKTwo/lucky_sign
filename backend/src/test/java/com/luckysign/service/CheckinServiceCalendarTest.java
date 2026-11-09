@@ -4,6 +4,7 @@ import com.luckysign.domain.DrawStatus;
 import com.luckysign.dto.CheckinDtos;
 import com.luckysign.entity.DailyDraw;
 import com.luckysign.repository.CheckinRecordRepository;
+import com.luckysign.repository.CircleMemberRepository;
 import com.luckysign.repository.DailyDrawRepository;
 import com.luckysign.repository.UserRepository;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,8 @@ class CheckinServiceCalendarTest {
     @Mock
     private CheckinRecordRepository checkinRecordRepository;
     @Mock
+    private CircleMemberRepository circleMemberRepository;
+    @Mock
     private PointsService pointsService;
     @Mock
     private DrawService drawService;
@@ -42,7 +45,7 @@ class CheckinServiceCalendarTest {
     void calendarMarksCompletedMissedAndPending() {
         CheckinService service = new CheckinService(
                 userRepository, dailyDrawRepository, checkinRecordRepository,
-                pointsService, drawService, titleService, chatService,
+                circleMemberRepository, pointsService, drawService, titleService, chatService,
                 fileStorageService, ratingService);
         LocalDate today = LocalDate.of(2026, 9, 11);
         when(drawService.today()).thenReturn(today);

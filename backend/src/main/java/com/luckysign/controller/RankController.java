@@ -25,6 +25,6 @@ public class RankController {
     public ApiResponse<RankDtos.RankingResponse> ranking(@RequestParam(required = false) Long circleId) {
         Long userId = AuthSupport.currentUserId();
         Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
-        return ApiResponse.ok(rankService.ranking(resolvedCircleId));
+        return ApiResponse.ok(rankService.ranking(resolvedCircleId, userId));
     }
 }

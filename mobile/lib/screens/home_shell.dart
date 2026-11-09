@@ -17,6 +17,8 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
+  void _openCommunity() => setState(() => _index = 1);
+
   Widget _communityIcon({required bool selected}) {
     return ValueListenableBuilder<List<int>>(
       valueListenable: ChatInbox.instance.unreadIds,
@@ -42,7 +44,7 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(
         index: _index,
         children: [
-          TodayScreen(isActive: _index == 0),
+          TodayScreen(isActive: _index == 0, onOpenCommunity: _openCommunity),
           ChatScreen(isActive: _index == 1),
           RankScreen(isActive: _index == 2),
           ProfileScreen(isActive: _index == 3),

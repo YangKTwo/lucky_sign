@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../main.dart';
 import '../services/api_client.dart';
+import '../services/reminder_service.dart';
 import '../theme.dart';
 import '../utils/errors.dart';
 import '../utils/refresh_gate.dart';
@@ -170,6 +171,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('邀请码已复制')));
   }
 
+  Future<void> _toggleReminders(bool enabled) async {
+    await ReminderService.instance.setEnabled(enabled);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(enabled ? '已打开本地 8:00 / 20:00 提醒' : '已关闭本地提醒')),
+    );
+  }
+
   Future<void> _changePassword() async {
     final ok = await showModalBottomSheet<bool>(
       context: context,
@@ -277,6 +287,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title: '修改密码',
                 subtitle: '需要验证当前密码',
                 onTap: _changePassword,
+              ),
+              const SizedBox(height: 10),
+              FutureBuilder<bool>(
+                future: ReminderService.instance.isEnabled(),
+                builder: (context, snap) {
+                  final on = snap.data ?? true;
+                  return SettingsTile(
+                    icon: Icons.notifications_outlined,
+                    title: '打卡提醒',
+                    subtitle: on ? '每天 8:00 和 20:00 本地提醒，不走系统推送' : '已关闭。打开后仅本机提醒',
+                    onTap: () => _toggleReminders(!on),
+                    trailing: Switch.adaptive(
+                      value: on,
+                      onChanged: _toggleReminders,
+                    ),
+                  );
+                },
               ),
               if (p['role']?.toString() == 'ADMIN') ...[
                 const SizedBox(height: 10),
@@ -822,7 +849,13 @@ class _StreakHeatmap extends StatelessWidget {
     }
     const cell = 12.0;
     const gap = 3.0;
-    final weeks = (days.length / 7).ceil();
+    var pad = 0;
+    if (days.isNotEmpty) {
+      final first = DateTime.tryParse(days.first['date']?.toString() ?? '');
+      if (first != null) pad = first.weekday - DateTime.monday;
+    }
+    final cells = pad + days.length;
+    final weeks = (cells / 7).ceil();
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -840,7 +873,7 @@ class _StreakHeatmap extends StatelessWidget {
               height: 7 * (cell + gap) - gap,
               width: weeks * (cell + gap) - gap,
               child: CustomPaint(
-                painter: _HeatmapPainter(days: days, colorOf: _color, cell: cell, gap: gap),
+                painter: _HeatmapPainter(days: days, colorOf: _color, cell: cell, gap: gap, mondayPad: pad),
               ),
             ),
           ),
@@ -879,17 +912,25 @@ class _HeatLegend extends StatelessWidget {
 }
 
 class _HeatmapPainter extends CustomPainter {
-  _HeatmapPainter({required this.days, required this.colorOf, required this.cell, required this.gap});
+  _HeatmapPainter({
+    required this.days,
+    required this.colorOf,
+    required this.cell,
+    required this.gap,
+    this.mondayPad = 0,
+  });
   final List<Map<String, dynamic>> days;
   final Color Function(String?) colorOf;
   final double cell;
   final double gap;
+  final int mondayPad;
 
   @override
   void paint(Canvas canvas, Size size) {
     for (var i = 0; i < days.length; i++) {
-      final week = i ~/ 7;
-      final weekday = i % 7;
+      final idx = mondayPad + i;
+      final week = idx ~/ 7;
+      final weekday = idx % 7;
       final rect = Rect.fromLTWH(week * (cell + gap), weekday * (cell + gap), cell, cell);
       final paint = Paint()..color = colorOf(days[i]['status']?.toString());
       canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(2)), paint);
@@ -897,7 +938,8 @@ class _HeatmapPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _HeatmapPainter oldDelegate) => oldDelegate.days != days;
+  bool shouldRepaint(covariant _HeatmapPainter oldDelegate) =>
+      oldDelegate.days != days || oldDelegate.mondayPad != mondayPad;
 }
 
 class _PasswordSheet extends StatefulWidget {

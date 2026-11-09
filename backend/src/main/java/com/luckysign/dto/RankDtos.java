@@ -22,7 +22,10 @@ public class RankDtos {
             List<MemberStatus> byComposite,
             List<MemberStatus> byPoints,
             List<MemberStatus> byStreak,
-            LuckyStarInfo luckyStar
+            LuckyStarInfo luckyStar,
+            Integer memberCount,
+            Integer todayCompletedCount,
+            Integer myRankComposite
     ) {
     }
 
