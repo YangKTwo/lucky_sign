@@ -43,8 +43,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException e) {
-        String message = e.getMessage();
-        if (message != null && (message.contains("Duplicate") || message.contains("UNIQUE"))) {
+        String message = e.getMessage() == null ? "" : e.getMessage();
+        String lower = message.toLowerCase();
+        if (lower.contains("checkin") || lower.contains("uk_user_checkin")) {
+            log.warn("Duplicate checkin: {}", message);
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(new ApiResponse<>(false, "今日已打卡", null));
+        }
+        if (message.contains("Duplicate") || message.contains("UNIQUE") || lower.contains("unique")) {
             log.warn("Duplicate entry conflict: {}", message);
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(new ApiResponse<>(false, "数据已存在，请勿重复操作", null));

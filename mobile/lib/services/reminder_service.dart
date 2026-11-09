@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -8,8 +9,30 @@ class ReminderService {
   ReminderService._();
   static final ReminderService instance = ReminderService._();
 
+  static const enabledKey = 'remindersEnabled';
+
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   bool _ready = false;
+
+  Future<bool> isEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(enabledKey) ?? true;
+  }
+
+  Future<void> setEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(enabledKey, enabled);
+    if (enabled) {
+      await scheduleDaily();
+      return;
+    }
+    if (kIsWeb || !_ready) return;
+    try {
+      await _plugin.cancelAll();
+    } catch (e) {
+      debugPrint('ReminderService.cancel failed: $e');
+    }
+  }
 
   Future<void> init() async {
     if (kIsWeb) return;
@@ -46,6 +69,7 @@ class ReminderService {
 
   Future<void> scheduleDaily() async {
     if (kIsWeb || !_ready) return;
+    if (!await isEnabled()) return;
     try {
       await _plugin.cancelAll();
       await _daily(1, 8, 0, '今日幸运签已到', '打开看看今天的签文和任务吧');

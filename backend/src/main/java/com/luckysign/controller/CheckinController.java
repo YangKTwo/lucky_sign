@@ -61,8 +61,8 @@ public class CheckinController {
     @GetMapping("/streak")
     public ApiResponse<Integer> streak(@RequestParam(required = false) Long circleId) {
         Long userId = AuthSupport.currentUserId();
-        Long resolvedCircleId = circleAccessGuard.requireMemberAndResolve(circleId, userId);
-        return ApiResponse.ok(checkinService.today(resolvedCircleId, userId).streakDays());
+        circleAccessGuard.requireMemberAndResolve(circleId, userId);
+        return ApiResponse.ok(checkinService.streak(userId));
     }
 
     @PostMapping("/{checkinId}/rate")
